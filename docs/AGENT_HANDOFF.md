@@ -9,7 +9,8 @@ This file is the durable coordination record for Codex, Claude Code, and human m
 - Baseline release: annotated tag `v0.1.0` at commit `c7555fd`.
 - Active integration branch: `agent/add-ci-and-claude-handoff`.
 - License: MIT, Copyright (c) 2026 Eric Chan.
-- Container image and GitHub Release: not published.
+- Container image: not published.
+- GitHub Release: private draft for `v0.1.0` created; not published.
 
 ## Completed baseline
 
@@ -50,12 +51,12 @@ This branch adds:
 ## Next steps
 
 1. Review and merge the CI/handoff pull request after checks pass.
-2. Configure branch protection for `main`, requiring the CI `verify` job and pull requests.
-3. Prepare a draft GitHub Release for `v0.1.0` without publishing it.
+2. After GitHub Pro is enabled, protect `main` by requiring pull requests, the latest CI `verify` job, and resolved conversations; keep force-push and deletion disabled.
+3. Review the private draft GitHub Release for `v0.1.0`; do not publish it yet.
 4. Perform a separate public-readiness review before changing repository visibility.
 
 ## Known blockers
 
-- Branch protection cannot require the new CI check reliably until its workflow exists on the default branch.
+- GitHub branch protection and repository rulesets are unavailable for this private repository on the current account plan. Both APIs return HTTP 403 and require GitHub Pro or public visibility; the repository must remain private, so no rule was applied.
 - No container registry or release channel has been approved.
 - Claude Code can resume its independent review after the current subscription window resets; no API or repository fix is required.

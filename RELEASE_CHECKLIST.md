@@ -21,6 +21,7 @@ The first private repository baseline is published as annotated tag `v0.1.0` at 
 - GitHub repository: `Erichan12818/kb-core`, private.
 - Initial version: `v0.1.0`.
 - Container image: not published.
+- GitHub Release: private draft created; not published.
 
 ## Decisions still required
 
