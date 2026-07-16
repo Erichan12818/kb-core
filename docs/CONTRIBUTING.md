@@ -11,6 +11,13 @@ Open pull requests with a focused problem statement, the smallest practical diff
 Before sending a change, run:
 
 ```bash
-python -m py_compile kb/*.py
+python3 -m compileall -q kb tests
+python3 -m unittest discover -s tests -v
+find plugins/claude-code -type f -name '*.sh' -exec bash -n {} +
+docker compose config --quiet
+claude plugin validate plugins/claude-code
+git diff --check
 rg -n "192\\.168\\.|/Users/|/Volumes/|discord(?:app)?\\.com/api/webhooks|sk-[A-Za-z0-9]" .
 ```
+
+Keep `docs/AGENT_HANDOFF.md` current when work is intended to move between Codex, Claude Code, and human maintainers.

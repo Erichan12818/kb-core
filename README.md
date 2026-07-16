@@ -93,4 +93,5 @@ See [docs/TAXONOMY_POLICY.md](./docs/TAXONOMY_POLICY.md) for a fuller template a
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Taxonomy policy](./docs/TAXONOMY_POLICY.md)
 - [Contributing](./docs/CONTRIBUTING.md)
+- [Agent handoff](./docs/AGENT_HANDOFF.md)
 - [Security scan](./SECURITY_SCAN.md)

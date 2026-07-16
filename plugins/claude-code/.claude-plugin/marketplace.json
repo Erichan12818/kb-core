@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "kb-memory",
-      "description": "Connect Claude Code to a private nas-to-qdrant long-term KB via session priming, recall skill, and MCP tools.",
+      "description": "Connect Claude Code to a private kb-core long-term KB via session priming, recall skill, and MCP tools.",
       "version": "0.1.2",
       "source": "./"
     }
