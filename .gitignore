@@ -1,0 +1,9 @@
+vault/
+config/kb_config.yaml
+logs/
+*.jsonl
+.env*
+__pycache__/
+*.py[cod]
+.venv/
+venv/

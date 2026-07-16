@@ -1,0 +1,51 @@
+queries:
+  - id: q01
+    query: "Qdrant 集合如何設定混合檢索"
+    expected_category: claude-code
+    expected_keywords: ["dense", "sparse", "collection"]
+    notes: "核心 RAG 設定問題"
+  - id: q02
+    query: "Codex session start 如何接入本地知識庫"
+    expected_category: claude-code
+    expected_keywords: ["SessionStart", "kb_recall", "RAG"]
+    notes: "Claude Code / Codex 接入流程"
+  - id: q03
+    query: "Hermes Discord bot 如何入庫"
+    expected_category: hermes
+    expected_keywords: ["kb-add", "Discord", "NAS"]
+    notes: "入庫流程"
+  - id: q04
+    query: "Hermes 使用本地模型時如何路由到 Ollama"
+    expected_category: hermes
+    expected_keywords: ["Ollama", "Hermes", "model"]
+    notes: "Hermes 本地模型路由"
+  - id: q05
+    query: "AMD 盤中 ORB VWAP 訊號為何未觸發"
+    expected_category: trading
+    expected_keywords: ["AMD", "ORB", "VWAP", "volume"]
+    notes: "交易監控與訊號排查"
+  - id: q06
+    query: "長橋 token 到期前需要做甚麼"
+    expected_category: trading
+    expected_keywords: ["Longbridge", "token", "ACCESS_TOKEN"]
+    notes: "交易系統憑證維護"
+  - id: q07
+    query: "雜記分類裡有哪些 taxonomy 或知識庫整理規則"
+    expected_category: 雜記
+    expected_keywords: ["taxonomy", "KnowledgeBase", "分類"]
+    notes: "雜記類知識整理"
+  - id: q08
+    query: "RelayLink message layer 如何整合 claude-peers broker"
+    expected_category: relaylink
+    expected_keywords: ["RelayLink", "claude-peers", "broker"]
+    notes: "RelayLink 即時訊息層"
+  - id: q09
+    query: "RelayLink task DAG 和 worker 認領流程怎樣運作"
+    expected_category: relaylink
+    expected_keywords: ["task", "worker", "claim"]
+    notes: "RelayLink 任務編排"
+  - id: q10
+    query: "inbox 裡待處理的知識庫剪藏如何分類"
+    expected_category: inbox
+    expected_keywords: ["inbox", "分類", "KnowledgeBase"]
+    notes: "Inbox 待整理資料"

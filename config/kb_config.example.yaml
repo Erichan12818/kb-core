@@ -1,0 +1,60 @@
+kb_root: /vault
+qdrant:
+  host: qdrant
+  port: 6333
+  collection: kb_hybrid_v2
+  timeout_batch: 60
+  timeout_interactive: 15
+embedding:
+  dense_model: intfloat/multilingual-e5-large
+  sparse_model: Qdrant/bm25
+  dense_dim: 1024
+chunking:
+  size: 500
+  overlap: 50
+llm:
+  providers:
+    local:
+      type: ollama
+      url: http://ollama:11434
+    cloud:
+      type: openai_compat
+      base_url: https://api.deepseek.com/v1
+      key_env: DEEPSEEK_API_KEY
+      key_env_file: ''
+      extra_body:
+        thinking:
+          type: disabled
+  roles:
+    classify:
+      provider: cloud
+      model: deepseek-v4-flash
+      fallback:
+        provider: local
+        model: qwen2.5:14b
+    audit:
+      provider: local
+      model: qwen2.5:14b
+    vision:
+      provider: local
+      model: gemma3:12b
+  sensitive_provider: local
+notify:
+  command: ''
+  webhook_url: ''
+  format: discord
+api:
+  host: 0.0.0.0
+  port: 8377
+  token: ''
+recall:
+  top_k: 4
+  cat_boost: 0.6
+  topic_boost: 0.2
+  fetch_mult: 5
+schedule:
+  health_interval_seconds: 14400
+  ingest_daily: '03:10'
+  catalog_daily: '03:20'
+  audit_weekly: 'Sun 04:00'
+  eval_weekly: 'Sun 04:30'

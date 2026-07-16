@@ -1,0 +1,48 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles:
+      - local-llm
+    volumes:
+      - ollama_data:/root/.ollama
+
+  kb-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8377:8377"
+    volumes:
+      - ./vault:/vault
+      - ./config:/config
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      KB_CONFIG: /config/kb_config.yaml
+      KB_ROOT: /vault
+    depends_on:
+      - qdrant
+
+  kb-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: worker
+    volumes:
+      - ./vault:/vault
+      - ./config:/config
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      KB_CONFIG: /config/kb_config.yaml
+      KB_ROOT: /vault
+    depends_on:
+      - qdrant
+
+volumes:
+  qdrant_data: {}
+  ollama_data: {}
+  hf_cache: {}
