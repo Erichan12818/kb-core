@@ -16,7 +16,7 @@ kb_health.py — KB 全鏈路健康檢查（只在狀態變化時推播，避免
   python3 kb_health.py --status   # 只印狀態唔推播
 零外部依賴（stdlib only），可直接俾 launchd 跑。
 """
-import os, sys, json, urllib.request, datetime
+import os, sys, json, urllib.request, urllib.error, datetime
 from pathlib import Path
 from .config import cfg
 from . import notify as kb_notify
@@ -35,9 +35,42 @@ def _get(url, timeout=5):
         return json.loads(r.read().decode())
 
 
+def _vault_is_empty():
+    """True when no source file has ever been added.
+
+    A brand new install has no collection and no INDEX.json, and reporting that
+    as a failure makes a working install look broken on first run. The same
+    artifacts missing while raw_files has content is a real problem, so the two
+    cases have to be told apart rather than both painted red.
+    """
+    raw_root = os.path.join(KB_ROOT, "raw_files")
+    if not os.path.isdir(raw_root):
+        return True
+    for _, _, files in os.walk(raw_root):
+        if any(not f.startswith(".") for f in files):
+            return False
+    return True
+
+
+def _local_provider_in_use():
+    """True when any configured role (or its fallback) routes to the local provider."""
+    if str(cfg("llm.sensitive_provider", "local")).strip() == "local":
+        return True
+    for role in (cfg("llm.roles", {}) or {}).values():
+        if not isinstance(role, dict):
+            continue
+        if role.get("provider") == "local":
+            return True
+        fallback = role.get("fallback")
+        if isinstance(fallback, dict) and fallback.get("provider") == "local":
+            return True
+    return False
+
+
 def check():
     """回 {check_name: (ok: bool, detail: str)}"""
     out = {}
+    empty = _vault_is_empty()
 
     out["nas"] = (os.path.isdir(os.path.join(KB_ROOT, "raw_files")),
                   KB_ROOT)
@@ -45,7 +78,19 @@ def check():
     try:
         d = _get(QDRANT_URL)
         pts = d["result"]["points_count"]
-        out["qdrant"] = (pts > 0, f"{pts} points")
+        if pts == 0 and empty:
+            out["qdrant"] = (True, "已連上，未有資料（尚未加入任何筆記）")
+        else:
+            out["qdrant"] = (pts > 0, f"{pts} points")
+    except urllib.error.HTTPError as e:
+        # 404 means the collection has not been created yet — expected until the
+        # first ingest, but suspicious once raw_files has content.
+        if e.code == 404 and empty:
+            out["qdrant"] = (True, "已連上，collection 未建（尚未加入任何筆記）")
+        elif e.code == 404:
+            out["qdrant"] = (False, "collection 未建，但 raw_files 已有內容——請跑 ingest")
+        else:
+            out["qdrant"] = (False, f"HTTP {e.code}")
     except Exception as e:
         out["qdrant"] = (False, f"{type(e).__name__}")
 
@@ -53,13 +98,26 @@ def check():
         _get(OLLAMA_URL, timeout=3)
         out["ollama"] = (True, "up")
     except Exception as e:
-        out["ollama"] = (False, f"{type(e).__name__}")
+        # Ollama backs the optional local-llm profile. It being absent is a
+        # deployment choice, not a fault, so only call it a failure when the
+        # config actually routes a role to the local provider.
+        if _local_provider_in_use():
+            out["ollama"] = (
+                False,
+                "連唔上，但 config 有角色路由到 local——"
+                "開 local-llm profile，或者改 llm.roles 全部行 cloud",
+            )
+        else:
+            out["ollama"] = (True, "未啟用（可選 local-llm profile）")
 
     try:
         age_days = (datetime.datetime.now().timestamp() - os.path.getmtime(INDEX_PATH)) / 86400
         out["index_fresh"] = (age_days <= INDEX_STALE_DAYS, f"{age_days:.1f} 日前更新")
     except OSError:
-        out["index_fresh"] = (False, "INDEX.json 不存在/讀不到")
+        if empty:
+            out["index_fresh"] = (True, "尚未建立（未加入任何筆記）")
+        else:
+            out["index_fresh"] = (False, "INDEX.json 不存在/讀不到")
 
     out["integrity"] = check_integrity()
     return out
@@ -67,10 +125,13 @@ def check():
 
 def check_integrity():
     """數據鏈路完整性：raw_files ↔ ingest_manifest ↔ INDEX 對齊 + 檔名碰撞。
-    NAS 未掛時回 (True, 'NAS 未掛，跳過')——唔重複報 nas 檢查嘅故障。"""
+    NAS 未掛時回 (True, 'NAS 未掛，跳過')——唔重複報 nas 檢查嘅故障。
+    全新未用過嘅 vault 同樣跳過：state 檔未生成係預期，唔係損毀。"""
     raw_root = os.path.join(KB_ROOT, "raw_files")
     if not os.path.isdir(raw_root):
         return (True, "NAS 未掛，跳過")
+    if _vault_is_empty():
+        return (True, "尚未加入任何筆記，跳過")
     try:
         manifest = json.loads(Path(os.path.join(KB_ROOT, "state", "ingest_manifest.json")).read_text())
         index = json.loads(Path(INDEX_PATH).read_text())
@@ -115,6 +176,9 @@ def load_state():
 
 
 def save_state(s):
+    # On a fresh vault state/ does not exist yet, and the first scheduled health
+    # run would otherwise die before it could report anything.
+    Path(STATE_PATH).parent.mkdir(parents=True, exist_ok=True)
     Path(STATE_PATH).write_text(json.dumps(s, ensure_ascii=False))
 
 
