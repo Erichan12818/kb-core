@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""KB 最小 HTTP API：/add、/recall、/health。"""
+"""KB 最小 HTTP API：add、recall、health 與 proposals 人閘。"""
 import argparse
+import datetime
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,6 +10,16 @@ from .config import cfg
 
 _RECALL = {}
 _RECALL_LOCK = threading.Lock()
+_PROPOSAL_LOCK = threading.Lock()
+_PROPOSAL_JOB = {
+    "running": False,
+    "state": "idle",
+    "id": None,
+    "ok": None,
+    "message": "",
+    "started_at": None,
+    "finished_at": None,
+}
 
 
 def _json_bytes(payload):
@@ -23,6 +34,60 @@ def _health_json():
         name: {"ok": ok, "detail": detail}
         for name, (ok, detail) in results.items()
     }
+
+
+def _proposal_status():
+    with _PROPOSAL_LOCK:
+        return dict(_PROPOSAL_JOB)
+
+
+def _run_proposal_apply(pid):
+    from . import apply as kb_apply
+
+    try:
+        ok, message = kb_apply.apply_proposal(pid)
+    except Exception as exc:
+        ok = False
+        message = f"{type(exc).__name__}: {exc}"
+    with _PROPOSAL_LOCK:
+        _PROPOSAL_JOB.update(
+            {
+                "running": False,
+                "state": "completed" if ok else "failed",
+                "ok": ok,
+                "message": message,
+                "finished_at": datetime.datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+            }
+        )
+
+
+def _start_proposal_apply(pid):
+    with _PROPOSAL_LOCK:
+        if _PROPOSAL_JOB["running"]:
+            return False, dict(_PROPOSAL_JOB)
+        _PROPOSAL_JOB.update(
+            {
+                "running": True,
+                "state": "running",
+                "id": pid,
+                "ok": None,
+                "message": "",
+                "started_at": datetime.datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+                "finished_at": None,
+            }
+        )
+        status = dict(_PROPOSAL_JOB)
+    threading.Thread(
+        target=_run_proposal_apply,
+        args=(pid,),
+        name=f"kb-proposal-{pid}",
+        daemon=True,
+    ).start()
+    return True, status
 
 
 def _recall_components():
@@ -103,10 +168,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._require_auth():
             return
-        if self.path != "/health":
+        if self.path == "/health":
+            self._send_json(200, _health_json())
+        elif self.path == "/proposals":
+            from . import proposals
+
+            doc = proposals.load()
+            self._send_json(
+                200,
+                {
+                    "updated_at": doc.get("updated_at"),
+                    "proposals": doc.get("proposals", []),
+                },
+            )
+        elif self.path == "/proposals/status":
+            self._send_json(200, _proposal_status())
+        else:
             self._send_json(404, {"error": "not_found"})
-            return
-        self._send_json(200, _health_json())
 
     def do_POST(self):
         if not self._require_auth():
@@ -121,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_add(body)
         elif self.path == "/recall":
             self._post_recall(body)
+        elif self.path == "/proposals":
+            self._post_proposals(body)
         else:
             self._send_json(404, {"error": "not_found"})
 
@@ -158,6 +238,61 @@ class Handler(BaseHTTPRequestHandler):
                 "hits": [],
                 "error": f"KB 檢索不可用（{type(e).__name__}）：{e}",
             })
+
+    def _post_proposals(self, body):
+        operation = str(body.get("op") or "").strip().lower()
+        pid = str(body.get("id") or "").strip()
+        note = str(body.get("note") or "").strip()
+        if operation not in ("apply", "reject", "dryrun"):
+            self._send_json(
+                400, {"error": "op must be apply, reject, or dryrun"}
+            )
+            return
+        if not pid:
+            self._send_json(400, {"error": "id required"})
+            return
+
+        if operation == "apply":
+            started, status = _start_proposal_apply(pid)
+            if not started:
+                self._send_json(
+                    409, {"error": "proposal job already running", "job": status}
+                )
+                return
+            self._send_json(202, {"accepted": True, "job": status})
+            return
+
+        if _proposal_status()["running"]:
+            self._send_json(
+                409,
+                {
+                    "error": "proposal job already running",
+                    "job": _proposal_status(),
+                },
+            )
+            return
+
+        from . import apply as kb_apply
+
+        try:
+            if operation == "dryrun":
+                ok, message = kb_apply.apply_proposal(pid, dry_run=True)
+            else:
+                ok, message = kb_apply.reject_proposal(pid, note)
+            self._send_json(
+                200 if ok else 409,
+                {"ok": ok, "op": operation, "id": pid, "message": message},
+            )
+        except Exception as exc:
+            self._send_json(
+                500,
+                {
+                    "ok": False,
+                    "op": operation,
+                    "id": pid,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
 
 
 def main():

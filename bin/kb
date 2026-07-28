@@ -42,6 +42,16 @@ def main():
     sub.add_parser("health", help="run health check")
     sub.add_parser("eval", help="run recall eval")
 
+    p = sub.add_parser("proposals", help="review taxonomy proposals")
+    proposal_sub = p.add_subparsers(dest="proposal_cmd", required=True)
+    proposal_sub.add_parser("list", help="list pending proposals")
+    proposal_apply = proposal_sub.add_parser("apply", help="apply a proposal")
+    proposal_apply.add_argument("id")
+    proposal_apply.add_argument("--dry-run", action="store_true")
+    proposal_reject = proposal_sub.add_parser("reject", help="reject a proposal")
+    proposal_reject.add_argument("id")
+    proposal_reject.add_argument("note", nargs="*")
+
     p = sub.add_parser("serve", help="serve HTTP API")
     p.add_argument("--host")
     p.add_argument("--port", type=int)
@@ -74,6 +84,15 @@ def main():
         if args.port:
             argv += ["--port", str(args.port)]
         return _run("api", argv + rest)
+    if args.cmd == "proposals":
+        argv = [args.proposal_cmd]
+        if args.proposal_cmd in ("apply", "reject"):
+            argv.append(args.id)
+        if args.proposal_cmd == "apply" and args.dry_run:
+            argv.append("--dry-run")
+        if args.proposal_cmd == "reject" and args.note:
+            argv += args.note
+        return _run("apply", argv + rest)
     if args.cmd == "worker":
         return _run("worker", rest)
     if args.cmd == "mcp":
