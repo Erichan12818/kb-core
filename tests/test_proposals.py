@@ -4,7 +4,11 @@ from kb import apply as kb_apply
 from kb import audit, proposals
 
 
-def _move_proposal(filename="source.md", action="move_files"):
+def _move_proposal(
+    filename="source.md",
+    action="move_files",
+    to_category="new",
+):
     return proposals.make(
         action,
         "移動測試",
@@ -14,7 +18,7 @@ def _move_proposal(filename="source.md", action="move_files"):
                 {
                     "file": filename,
                     "from_category": "old",
-                    "to_category": "new",
+                    "to_category": to_category,
                 }
             ]
         },
@@ -85,6 +89,14 @@ def test_rejected_fingerprint_does_not_return_to_pending():
             _move_proposal(action="delete_everything"),
             lambda root: None,
             "未支援嘅 action",
+        ),
+        (
+            _move_proposal(to_category="../../../tmp/evil"),
+            lambda root: (
+                (root / "raw_files" / "old").mkdir(parents=True),
+                (root / "raw_files" / "old" / "source.md").write_text("old"),
+            ),
+            "路徑越界",
         ),
     ],
 )

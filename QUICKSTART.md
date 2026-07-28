@@ -66,6 +66,15 @@ curl -s http://127.0.0.1:8377/recall   -H 'Content-Type: application/json'   -d 
 curl -s http://127.0.0.1:8377/health
 ```
 
+The local web interface is available at:
+
+```text
+http://127.0.0.1:8377/ui
+```
+
+It provides retrieval-only search, pending-proposal review, and health status.
+It displays raw excerpts and source paths; it does not generate answers.
+
 CLI equivalents:
 
 ```bash
@@ -83,3 +92,11 @@ Point future MCP/Claude Code plugin layers at:
 - health endpoint: `GET http://127.0.0.1:8377/health`
 
 The detailed MCP/plugin packaging belongs to the P3 specs.
+
+## Network security
+
+The host port is intentionally bound to `127.0.0.1` by default. kb-core v0.1
+does not provide built-in authentication suitable for exposing the UI directly
+to a LAN or the public internet. If LAN access is required, keep kb-core behind
+your own authenticated reverse proxy and configure that proxy's transport and
+access controls before changing the bind address.

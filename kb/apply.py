@@ -26,6 +26,27 @@ NOTES = KB_ROOT / "notes"
 TRASH = KB_ROOT / "trash"
 
 
+def _resolve_within(path, root, label, problems):
+    """Resolve symlinks/``..`` and reject paths that leave their intended root."""
+    resolved = path.resolve()
+    root_resolved = root.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError:
+        problems.append(
+            f"路徑越界（{label} 必須位於 {root_resolved} 之下）：{resolved}"
+        )
+        return None
+    return resolved
+
+
+def _display_path(path):
+    try:
+        return path.relative_to(KB_ROOT.resolve())
+    except ValueError:
+        return path
+
+
 def preflight(proposal):
     """驗證建議並回 ``(ok, problems, plan)``；plan 項為 ``(src, dst, kind)``。"""
     problems, plan = [], []
@@ -43,19 +64,41 @@ def preflight(proposal):
             except (KeyError, TypeError):
                 problems.append("move_files 參數不完整")
                 continue
-            source = RAW / source_category / filename
-            destination = RAW / target_category / filename
+            source = _resolve_within(
+                RAW / source_category / filename,
+                RAW,
+                "raw source",
+                problems,
+            )
+            destination = _resolve_within(
+                RAW / target_category / filename,
+                RAW,
+                "raw destination",
+                problems,
+            )
+            note_source = _resolve_within(
+                NOTES / source_category / filename,
+                NOTES,
+                "notes source",
+                problems,
+            )
+            note_destination = _resolve_within(
+                NOTES / target_category / filename,
+                NOTES,
+                "notes destination",
+                problems,
+            )
+            if None in (source, destination, note_source, note_destination):
+                continue
             if not source.exists():
-                problems.append(f"來源檔唔存在：{source.relative_to(KB_ROOT)}")
+                problems.append(f"來源檔唔存在：{_display_path(source)}")
                 continue
             if destination.exists():
                 problems.append(
-                    f"目標已有同名檔（唔會覆蓋）：{destination.relative_to(KB_ROOT)}"
+                    f"目標已有同名檔（唔會覆蓋）：{_display_path(destination)}"
                 )
                 continue
             plan.append((source, destination, "raw"))
-            note_source = NOTES / source_category / filename
-            note_destination = NOTES / target_category / filename
             if note_source.exists() and not note_destination.exists():
                 plan.append((note_source, note_destination, "notes"))
     elif action == "archive_files":
@@ -66,24 +109,48 @@ def preflight(proposal):
             except (KeyError, TypeError):
                 problems.append("archive_files 參數不完整")
                 continue
-            source = RAW / source_category / filename
-            destination = TRASH / source_category / filename
+            source = _resolve_within(
+                RAW / source_category / filename,
+                RAW,
+                "raw source",
+                problems,
+            )
+            destination = _resolve_within(
+                TRASH / source_category / filename,
+                TRASH,
+                "trash destination",
+                problems,
+            )
+            note_source = _resolve_within(
+                NOTES / source_category / filename,
+                NOTES,
+                "notes source",
+                problems,
+            )
+            note_destination = _resolve_within(
+                TRASH / "notes" / source_category / filename,
+                TRASH,
+                "notes trash destination",
+                problems,
+            )
+            if None in (source, destination, note_source, note_destination):
+                continue
             if not source.exists():
-                problems.append(f"來源檔唔存在：{source.relative_to(KB_ROOT)}")
+                problems.append(f"來源檔唔存在：{_display_path(source)}")
                 continue
             if destination.exists():
                 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-                destination = TRASH / source_category / f"{stamp}-{filename}"
-            plan.append((source, destination, "raw"))
-            note_source = NOTES / source_category / filename
-            if note_source.exists():
-                plan.append(
-                    (
-                        note_source,
-                        TRASH / "notes" / source_category / filename,
-                        "notes",
-                    )
+                destination = _resolve_within(
+                    TRASH / source_category / f"{stamp}-{filename}",
+                    TRASH,
+                    "trash destination",
+                    problems,
                 )
+                if destination is None:
+                    continue
+            plan.append((source, destination, "raw"))
+            if note_source.exists():
+                plan.append((note_source, note_destination, "notes"))
     else:
         problems.append(f"未支援嘅 action：{action}")
 
@@ -158,8 +225,8 @@ def apply_proposal(pid, dry_run=False):
     print(f"\n   將會搬 {len(plan)} 個檔：")
     for source, destination, kind in plan:
         print(
-            f"   - [{kind}] {source.relative_to(KB_ROOT)}"
-            f" → {destination.relative_to(KB_ROOT)}"
+            f"   - [{kind}] {_display_path(source)}"
+            f" → {_display_path(destination)}"
         )
     if problems:
         print("\n   ⚠️ 問題：")
