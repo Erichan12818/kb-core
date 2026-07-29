@@ -229,6 +229,12 @@ class Handler(BaseHTTPRequestHandler):
             from .recall import taxonomy_categories
 
             self._send_json(200, {"categories": taxonomy_categories()})
+        elif path == "/capabilities":
+            # Lets the UI hide surfaces this deployment has not turned on,
+            # instead of showing a tab that only ever returns an error.
+            from . import chat as kb_chat
+
+            self._send_json(200, {"chat": kb_chat.is_enabled()})
         elif path == "/proposals":
             from . import proposals
 
@@ -261,8 +267,42 @@ class Handler(BaseHTTPRequestHandler):
             self._post_recall(body)
         elif path == "/proposals":
             self._post_proposals(body)
+        elif path == "/chat":
+            self._post_chat(body)
         else:
             self._send_json(404, {"error": "not_found"})
+
+    def _post_chat(self, body):
+        """Answer from retrieved excerpts only. Disabled unless a chat role is configured."""
+        from . import chat as kb_chat
+
+        question = (body.get("question") or "").strip()
+        if not question:
+            self._send_json(400, {"error": "question required"})
+            return
+        if not kb_chat.is_enabled():
+            self._send_json(503, {
+                "error": "chat_disabled",
+                "message": "對話功能未啟用：kb_config.yaml 嘅 llm.roles 未設 chat 角色。",
+            })
+            return
+        history = body.get("history")
+        history = history if isinstance(history, list) else []
+        category = body.get("category")
+        try:
+            top_k = int(body.get("top_k") or 6)
+        except (TypeError, ValueError):
+            top_k = 6
+        try:
+            found = _recall(question, category=category, top_k=top_k)
+            result = kb_chat.answer(question, found["hits"], history)
+            result["category_guess"] = found.get("category_guess")
+            self._send_json(200, result)
+        except Exception as e:
+            self._send_json(503, {
+                "error": f"{type(e).__name__}",
+                "message": str(e)[:400],
+            })
 
     def _post_add(self, body):
         content = (body.get("content") or "").strip()

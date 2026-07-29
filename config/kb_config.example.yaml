@@ -35,6 +35,13 @@ llm:
     audit:
       provider: local
       model: qwen2.5:14b
+    # Optional. Adding a chat role turns on the /chat endpoint and the UI's
+    # Ask tab. Leave it out and kb-core stays retrieval-only, which is the
+    # right choice when an agent is already querying the knowledge base.
+    # Point it at a model good enough to be trusted with your notes.
+    # chat:
+    #   provider: cloud
+    #   model: deepseek-v4-flash
     vision:
       provider: local
       model: gemma3:12b

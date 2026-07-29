@@ -24,6 +24,13 @@ services:
     environment:
       KB_CONFIG: /config/kb_config.yaml
       KB_ROOT: /vault
+    # Provider keys are looked up by the name given in llm.providers.*.key_env,
+    # so they have to reach the container. Putting them in .env passes them
+    # through whatever they are called, instead of this file having to know
+    # every provider anyone might use. The file is optional.
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       - qdrant
 
@@ -39,6 +46,13 @@ services:
     environment:
       KB_CONFIG: /config/kb_config.yaml
       KB_ROOT: /vault
+    # Provider keys are looked up by the name given in llm.providers.*.key_env,
+    # so they have to reach the container. Putting them in .env passes them
+    # through whatever they are called, instead of this file having to know
+    # every provider anyone might use. The file is optional.
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       - qdrant
 

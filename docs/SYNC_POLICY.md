@@ -32,6 +32,12 @@ dashboard or control panel. These stay in the deployment. When the product
 needs any of them, it takes them as configuration or as an optional hook rather
 than hard-coding one site's choice.
 
+Product-only: surfaces that exist because a downloader has no coding agent
+attached. A deployment that already has agents querying the knowledge base
+gains nothing from a chat window, so features of that kind are built here and
+deliberately not ported downstream. The test is whether the feature serves the
+knowledge base itself or only the way a particular audience reaches it.
+
 ## Module map
 
 Deployments derived from the original single-directory toolchain use flat

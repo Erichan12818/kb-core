@@ -15,11 +15,42 @@ The default compose config uses:
 - API: `127.0.0.1:8377` on the host
 - Hugging Face model cache: named volume `hf_cache`
 
-For cloud classification, set an OpenAI-compatible key in the shell that starts Compose:
+To use a cloud model for classification (and for the optional Ask tab), put the
+key in a `.env` file next to `compose.yaml`. Compose passes that file into the
+containers, and `.env` is git-ignored:
 
 ```bash
-export DEEPSEEK_API_KEY=...
+echo 'DEEPSEEK_API_KEY=sk-...' > .env
 ```
+
+The variable name has to match the `key_env` of the provider you configured in
+`kb_config.yaml`, so any OpenAI-compatible service works — just name it
+accordingly.
+
+Without a key, ingest still indexes your files and search still works; you just
+get no generated titles or topic tags.
+
+### Optional: ask questions in the UI
+
+kb-core is retrieval-only by default. If you want it to answer in prose instead
+of only showing excerpts, add a `chat` role under `llm.roles` in
+`kb_config.yaml`:
+
+```yaml
+llm:
+  roles:
+    chat:
+      provider: cloud
+      model: deepseek-v4-flash
+```
+
+An **Ask** tab then appears in the UI. Every answer is generated only from the
+excerpts retrieved for that question, and each one is shown beneath the reply
+with its citation number. An answer that cites nothing is flagged as
+unsupported rather than presented as fact.
+
+If a coding agent is already querying this knowledge base, leave this off — the
+agent is better served by raw excerpts than by a summary of them.
 
 For fully local LLM fallback/audit/vision, start the Ollama profile:
 
