@@ -10,7 +10,7 @@ kb_recall.py — 純檢索（retrieval-only，唔叫 qwen 生成）
 
 用法：
   python kb_recall.py "你的問題"
-  python kb_recall.py "問題" --category trading        # 只查某類
+  python kb_recall.py "問題" --category infrastructure  # 只查某類
   python kb_recall.py "問題" --top-k 6                  # 取多啲片段
   python kb_recall.py "問題" --json                     # 機器可讀輸出
 NAS 未掛 / Qdrant 連不上 → 印一行提示後 exit 0（唔拋例外，唔阻斷呼叫方）。

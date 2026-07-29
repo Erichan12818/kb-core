@@ -49,6 +49,15 @@ Copy `config/kb_config.example.yaml` to `config/kb_config.yaml` before running C
 | `schedule.catalog_daily` | Daily catalog render time in `HH:MM`. | `03:20` |
 | `schedule.audit_weekly` | Weekly taxonomy audit time in `Day HH:MM`. | `Sun 04:00` |
 | `schedule.eval_weekly` | Weekly retrieval evaluation time in `Day HH:MM`. | `Sun 04:30` |
+| `capture.url_fetcher` | Optional executable that takes a URL and prints markdown to stdout. Empty disables URL capture; text notes are unaffected. | `''` |
+
+## URL capture
+
+kb-core does not bundle an HTML-to-markdown extractor, because which one gives
+usable output depends on the sites you save. Point `capture.url_fetcher` at any
+executable that accepts a URL as its single argument and writes markdown to
+stdout, and `kb add <url>` will use it. With the setting empty, adding text
+works normally and adding a URL returns an error saying so.
 
 ## Environment Overrides
 

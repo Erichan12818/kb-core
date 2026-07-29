@@ -111,39 +111,56 @@ def test_preflight_blocks_unsafe_proposals(
     assert plan == []
 
 
+# Every case below is a near-duplicate score high enough to look like a
+# duplicate while being nothing of the sort. They are drawn from real audit
+# runs, where an unguarded model proposed archiving one side of each pair.
 @pytest.mark.parametrize(
-    ("left", "right", "expected"),
+    ("left", "right", "expected", "why"),
     [
         (
-            "2026-07-06-weekly-social-intel.md",
-            "2026-07-13-weekly-social-intel.md",
+            "2026-07-06-weekly-report.md",
+            "2026-07-13-weekly-report.md",
             True,
+            "same series, different weeks: identical structure, different content",
         ),
         (
-            "2026-06-18-webull-openapi-skill.md",
-            "2026-06-18-webull-openapi-readme.md",
+            "2026-06-18-api-guide.md",
+            "2026-06-18-api-readme.md",
             False,
+            "overlapping docs for one subject, but not a dated series",
         ),
-        ("skill-baoyu-translate.md", "skill-baoyu-url-to-markdown.md", False),
+        (
+            "setup-translate-tool.md",
+            "setup-markdown-tool.md",
+            False,
+            "parallel per-tool docs: shared template, distinct subject",
+        ),
     ],
 )
-def test_is_series_real_cases(left, right, expected):
-    assert audit._is_series(left, right) is expected
+def test_is_series_real_cases(left, right, expected, why):
+    assert audit._is_series(left, right) is expected, why
 
 
 def test_best_match_uses_highest_real_similarity_score():
-    readme = "2026-06-18-webull-openapi-readme.md"
-    openapi_skill = "2026-06-18-webull-openapi-skill.md"
-    trading_skill = "skill-trading.md"
+    """The guard exists because a model once proposed keeping the wrong file.
+
+    Given a README, it suggested archiving it in favour of a module reference
+    scoring 0.694, while the document it actually overlapped with — the guide
+    at 1.12 — was the one that made the pair redundant. Picking the highest
+    scoring counterpart is what stops that swap.
+    """
+    readme = "2026-06-18-api-readme.md"
+    guide = "2026-06-18-api-guide.md"
+    module_reference = "api-module-reference.md"
     index = {
         readme: {
             "near_duplicates": [
-                {"file": trading_skill, "score": 0.694},
-                {"file": openapi_skill, "score": 1.12},
+                {"file": module_reference, "score": 0.694},
+                {"file": guide, "score": 1.12},
             ]
         }
     }
-    assert audit._best_match(index, readme) == openapi_skill
+    assert audit._best_match(index, readme) == guide
 
 
 def test_resolve_only_accepts_pending_and_status_must_not_be_prechanged():

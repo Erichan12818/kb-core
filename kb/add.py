@@ -9,8 +9,8 @@ kb_add.py — 「丟即入」知識庫入口引擎（Scene01 #1#2，gateway 無�
 
 用法：
   python kb_add.py "https://example.com/article"            # 網頁 → 抓 → 入庫
-  python kb_add.py "一段文字筆記" --category 雜記            # 純文字 → 入庫
-  python kb_add.py "<url>" --category 技術 --no-ingest       # 只存檔，等排程灌
+  python kb_add.py "一段文字筆記" --category notes           # 純文字 → 入庫
+  python kb_add.py "<url>" --category reference --no-ingest  # 只存檔，等排程灌
 """
 import os, re, sys, subprocess, datetime, argparse, urllib.parse
 from pathlib import Path
@@ -18,7 +18,10 @@ from .config import cfg
 
 KB_ROOT  = cfg("kb_root")
 RAW_ROOT = os.path.join(KB_ROOT, "raw_files")
-BAOYU    = os.path.expanduser("~/.claude/skills/baoyu-url-to-markdown/scripts/baoyu-fetch")
+# Fetching a URL as clean markdown needs an external extractor; which one is a
+# deployment choice, so it is configured rather than assumed. Text capture works
+# without it.
+URL_FETCHER = os.path.expanduser(str(cfg("capture.url_fetcher", "") or ""))
 
 URL_RE = re.compile(r"^https?://", re.I)
 
@@ -39,9 +42,16 @@ def derive_title(text, maxlen=50):
     return "untitled"
 
 def fetch_url(url):
-    if not os.path.exists(BAOYU):
-        raise RuntimeError(f"找不到 baoyu-fetch：{BAOYU}")
-    out = subprocess.run([BAOYU, url], capture_output=True, text=True, timeout=180)
+    """Run the configured extractor and return markdown on stdout."""
+    if not URL_FETCHER:
+        raise RuntimeError(
+            "URL 擷取未設定。喺 kb_config.yaml 設 capture.url_fetcher 指向一個"
+            "「收 URL 參數、喺 stdout 出 markdown」嘅可執行檔；"
+            "未設定時純文字入庫照用。"
+        )
+    if not os.path.exists(URL_FETCHER):
+        raise RuntimeError(f"搵唔到 capture.url_fetcher 指定嘅程式：{URL_FETCHER}")
+    out = subprocess.run([URL_FETCHER, url], capture_output=True, text=True, timeout=180)
     if out.returncode != 0 or not out.stdout.strip():
         raise RuntimeError(f"抓網頁失敗：{(out.stderr or '空輸出')[:300]}")
     return out.stdout

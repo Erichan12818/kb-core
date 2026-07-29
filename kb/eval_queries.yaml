@@ -1,51 +1,68 @@
+# Example evaluation set.
+#
+# These queries describe a fictional knowledge base so the file can ship as a
+# template. Running it unchanged against your own vault will score near zero,
+# which is expected: the categories and keywords below are not in your data.
+#
+# To measure your own retrieval quality, replace every entry with questions you
+# actually ask, the category you would expect the answer to live in, and words
+# that must appear in a correct excerpt. Ten queries is enough to see movement.
+#
+#   python -m kb.eval --queries path/to/your_queries.yaml
+#
+# Field notes:
+#   query               what a user would type
+#   expected_category   the category folder the answer should come from
+#   expected_keywords   any one of these appearing in the top hits counts
+#   notes               free text, for your own reference
 queries:
   - id: q01
-    query: "Qdrant 集合如何設定混合檢索"
-    expected_category: claude-code
+    query: "how is the vector collection configured for hybrid search"
+    expected_category: infrastructure
     expected_keywords: ["dense", "sparse", "collection"]
-    notes: "核心 RAG 設定問題"
+    notes: "core retrieval setup"
   - id: q02
-    query: "Codex session start 如何接入本地知識庫"
-    expected_category: claude-code
-    expected_keywords: ["SessionStart", "kb_recall", "RAG"]
-    notes: "Claude Code / Codex 接入流程"
+    query: "how do I connect an agent session to the knowledge base"
+    expected_category: infrastructure
+    expected_keywords: ["MCP", "recall", "session"]
+    notes: "agent integration path"
   - id: q03
-    query: "Hermes Discord bot 如何入庫"
-    expected_category: hermes
-    expected_keywords: ["kb-add", "Discord", "NAS"]
-    notes: "入庫流程"
+    query: "how does a note get added from chat"
+    expected_category: automation
+    expected_keywords: ["add", "ingest", "category"]
+    notes: "capture flow"
   - id: q04
-    query: "Hermes 使用本地模型時如何路由到 Ollama"
-    expected_category: hermes
-    expected_keywords: ["Ollama", "Hermes", "model"]
-    notes: "Hermes 本地模型路由"
+    query: "how are requests routed to a local model instead of the cloud"
+    expected_category: automation
+    expected_keywords: ["ollama", "provider", "role"]
+    notes: "LLM routing"
   - id: q05
-    query: "AMD 盤中 ORB VWAP 訊號為何未觸發"
-    expected_category: trading
-    expected_keywords: ["AMD", "ORB", "VWAP", "volume"]
-    notes: "交易監控與訊號排查"
+    query: "why did the scheduled job not fire last night"
+    expected_category: operations
+    expected_keywords: ["schedule", "worker", "log"]
+    notes: "operational troubleshooting"
   - id: q06
-    query: "長橋 token 到期前需要做甚麼"
-    expected_category: trading
-    expected_keywords: ["Longbridge", "token", "ACCESS_TOKEN"]
-    notes: "交易系統憑證維護"
+    query: "what has to happen before an access token expires"
+    expected_category: operations
+    expected_keywords: ["token", "expiry", "renew"]
+    notes: "credential maintenance"
   - id: q07
-    query: "雜記分類裡有哪些 taxonomy 或知識庫整理規則"
-    expected_category: 雜記
-    expected_keywords: ["taxonomy", "KnowledgeBase", "分類"]
-    notes: "雜記類知識整理"
+    query: "what rules govern how categories are split or merged"
+    expected_category: reference
+    expected_keywords: ["taxonomy", "category", "policy"]
+    notes: "taxonomy governance"
   - id: q08
-    query: "RelayLink message layer 如何整合 claude-peers broker"
-    expected_category: relaylink
-    expected_keywords: ["RelayLink", "claude-peers", "broker"]
-    notes: "RelayLink 即時訊息層"
+    query: "how does the message layer hand work between components"
+    expected_category: architecture
+    expected_keywords: ["queue", "broker", "message"]
+    notes: "inter-component messaging"
   - id: q09
-    query: "RelayLink task DAG 和 worker 認領流程怎樣運作"
-    expected_category: relaylink
+    query: "how does a worker claim and complete a task"
+    expected_category: architecture
     expected_keywords: ["task", "worker", "claim"]
-    notes: "RelayLink 任務編排"
+    notes: "task orchestration"
   - id: q10
-    query: "inbox 裡待處理的知識庫剪藏如何分類"
+    query: "how do unsorted captures get triaged into categories"
     expected_category: inbox
-    expected_keywords: ["inbox", "分類", "KnowledgeBase"]
-    notes: "Inbox 待整理資料"
+    expected_keywords: ["inbox", "triage", "category"]
+    notes: "inbox handling"

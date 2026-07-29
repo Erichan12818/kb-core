@@ -47,6 +47,10 @@ api:
   host: 0.0.0.0
   port: 8377
   token: ''
+capture:
+  # Optional. Path to an executable that takes a URL and prints markdown to
+  # stdout. Leave empty to disable URL capture; adding text notes still works.
+  url_fetcher: ''
 recall:
   top_k: 4
   cat_boost: 0.6

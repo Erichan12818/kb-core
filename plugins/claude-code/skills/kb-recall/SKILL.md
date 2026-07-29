@@ -34,7 +34,7 @@ metadata:
 
 ## 點用
 
-- **知道專案** → 加 `--category`（如 `--category trading`）收窄、減噪。
+- **知道專案** → 加 `--category`（例如 `--category infrastructure`，用你 vault 入面實際存在嘅類別名）收窄、減噪。
 - **跨專案 / 唔確定** → 唔加 category，全庫混合檢索。
 - **要多啲上下文** → `--top-k 6`（預設 4）。
 - **要機器可讀** → `--json`（串接其他步驟時用）。
