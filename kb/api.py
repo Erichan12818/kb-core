@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""KB 最小 HTTP API：/add、/recall、/health。"""
+"""KB 最小 HTTP API：add、recall、health 與 proposals 人閘。"""
 import argparse
+import datetime
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from .config import cfg
 
+UI_PATH = Path(__file__).with_name("static") / "ui.html"
 _RECALL = {}
 _RECALL_LOCK = threading.Lock()
+_PROPOSAL_LOCK = threading.Lock()
+_PROPOSAL_JOB = {
+    "running": False,
+    "state": "idle",
+    "id": None,
+    "ok": None,
+    "message": "",
+    "started_at": None,
+    "finished_at": None,
+}
 
 
 def _json_bytes(payload):
@@ -19,10 +34,93 @@ def _health_json():
     from . import health as kb_health
 
     results = kb_health.check()
-    return {
+    checks = {
         name: {"ok": ok, "detail": detail}
         for name, (ok, detail) in results.items()
     }
+    # Keep the original five top-level check keys for existing HTTP clients.
+    return {
+        **checks,
+        "checks": checks,
+        "directories": _directory_stats(),
+    }
+
+
+def _directory_stats():
+    root = Path(cfg("kb_root"))
+    stats = {}
+    for name in ("raw_files", "notes", "catalog", "trash", "state"):
+        directory = root / name
+        files = 0
+        size = 0
+        if directory.is_dir():
+            for dirpath, _, filenames in os.walk(directory):
+                for filename in filenames:
+                    files += 1
+                    try:
+                        size += (Path(dirpath) / filename).stat().st_size
+                    except OSError:
+                        pass
+        stats[name] = {
+            "exists": directory.is_dir(),
+            "files": files,
+            "bytes": size,
+        }
+    return stats
+
+
+def _proposal_status():
+    with _PROPOSAL_LOCK:
+        return dict(_PROPOSAL_JOB)
+
+
+def _run_proposal_apply(pid):
+    from . import apply as kb_apply
+
+    try:
+        ok, message = kb_apply.apply_proposal(pid)
+    except Exception as exc:
+        ok = False
+        message = f"{type(exc).__name__}: {exc}"
+    with _PROPOSAL_LOCK:
+        _PROPOSAL_JOB.update(
+            {
+                "running": False,
+                "state": "completed" if ok else "failed",
+                "ok": ok,
+                "message": message,
+                "finished_at": datetime.datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+            }
+        )
+
+
+def _start_proposal_apply(pid):
+    with _PROPOSAL_LOCK:
+        if _PROPOSAL_JOB["running"]:
+            return False, dict(_PROPOSAL_JOB)
+        _PROPOSAL_JOB.update(
+            {
+                "running": True,
+                "state": "running",
+                "id": pid,
+                "ok": None,
+                "message": "",
+                "started_at": datetime.datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+                "finished_at": None,
+            }
+        )
+        status = dict(_PROPOSAL_JOB)
+    threading.Thread(
+        target=_run_proposal_apply,
+        args=(pid,),
+        name=f"kb-proposal-{pid}",
+        daemon=True,
+    ).start()
+    return True, status
 
 
 def _recall_components():
@@ -49,22 +147,28 @@ def _recall_components():
         return _RECALL
 
 
-def _recall(query, category=None, top_k=None):
+def _recall(query, category=None, top_k=None, force_global=False):
     comps = _recall_components()
     kb_recall = comps["kb_recall"]
-    hits = kb_recall.retrieve(
+    outcome = kb_recall.retrieve_two_stage(
         comps["client"], comps["models"], comps["dense"], comps["sparse"],
-        query, category, top_k or kb_recall.TOP_K,
+        query, category, top_k or kb_recall.TOP_K, force_global=force_global,
     )
-    kb_recall.log_query(query, category, hits)
-    return [{
-        "rank": i + 1,
-        "category": h.payload.get("category"),
-        "source_file": h.payload.get("source_file"),
-        "score": round(h.score, 3),
-        "text": h.payload.get("text", ""),
-        "idx_title": h.payload.get("idx_title"),
-    } for i, h in enumerate(hits)]
+    hits = outcome["hits"]
+    effective_category = category or outcome["category_guess"]
+    kb_recall.log_query(query, effective_category, hits)
+    results = [
+        kb_recall.hit_to_result(hit, index + 1)
+        for index, hit in enumerate(hits)
+    ]
+    return {
+        "category_guess": outcome["category_guess"],
+        "confidence": outcome["confidence"],
+        "hits": results,
+        "groups": (
+            kb_recall.group_results(results) if outcome["grouped"] else []
+        ),
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -77,6 +181,13 @@ class Handler(BaseHTTPRequestHandler):
         data = _json_bytes(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_html(self, status, data):
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -103,10 +214,36 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._require_auth():
             return
-        if self.path != "/health":
+        path = urlsplit(self.path).path
+        if path == "/health":
+            self._send_json(200, _health_json())
+        elif path == "/ui":
+            try:
+                self._send_html(200, UI_PATH.read_bytes())
+            except OSError as exc:
+                self._send_json(
+                    500,
+                    {"error": f"UI unavailable ({type(exc).__name__}): {exc}"},
+                )
+        elif path == "/taxonomy":
+            from .recall import taxonomy_categories
+
+            self._send_json(200, {"categories": taxonomy_categories()})
+        elif path == "/proposals":
+            from . import proposals
+
+            doc = proposals.load()
+            self._send_json(
+                200,
+                {
+                    "updated_at": doc.get("updated_at"),
+                    "proposals": doc.get("proposals", []),
+                },
+            )
+        elif path == "/proposals/status":
+            self._send_json(200, _proposal_status())
+        else:
             self._send_json(404, {"error": "not_found"})
-            return
-        self._send_json(200, _health_json())
 
     def do_POST(self):
         if not self._require_auth():
@@ -117,10 +254,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"invalid_json: {e}"})
             return
 
-        if self.path == "/add":
+        path = urlsplit(self.path).path
+        if path == "/add":
             self._post_add(body)
-        elif self.path == "/recall":
+        elif path == "/recall":
             self._post_recall(body)
+        elif path == "/proposals":
+            self._post_proposals(body)
         else:
             self._send_json(404, {"error": "not_found"})
 
@@ -147,17 +287,84 @@ class Handler(BaseHTTPRequestHandler):
             top_k = int(body.get("top_k") or cfg("recall.top_k"))
         except Exception:
             top_k = cfg("recall.top_k")
-        category = body.get("category")
+        category = str(body.get("category") or "").strip() or None
+        force_global = body.get("global") is True
         try:
-            hits = _recall(query, category=category, top_k=top_k)
-            self._send_json(200, {"query": query, "category": category, "hits": hits})
+            result = _recall(
+                query,
+                category=category,
+                top_k=top_k,
+                force_global=force_global,
+            )
+            self._send_json(
+                200,
+                {"query": query, "category": category, **result},
+            )
         except Exception as e:
             self._send_json(503, {
                 "query": query,
                 "category": category,
+                "category_guess": None,
+                "confidence": 0.0,
                 "hits": [],
+                "groups": [],
                 "error": f"KB 檢索不可用（{type(e).__name__}）：{e}",
             })
+
+    def _post_proposals(self, body):
+        operation = str(body.get("op") or "").strip().lower()
+        pid = str(body.get("id") or "").strip()
+        note = str(body.get("note") or "").strip()
+        if operation not in ("apply", "reject", "dryrun"):
+            self._send_json(
+                400, {"error": "op must be apply, reject, or dryrun"}
+            )
+            return
+        if not pid:
+            self._send_json(400, {"error": "id required"})
+            return
+
+        if operation == "apply":
+            started, status = _start_proposal_apply(pid)
+            if not started:
+                self._send_json(
+                    409, {"error": "proposal job already running", "job": status}
+                )
+                return
+            self._send_json(202, {"accepted": True, "job": status})
+            return
+
+        if _proposal_status()["running"]:
+            self._send_json(
+                409,
+                {
+                    "error": "proposal job already running",
+                    "job": _proposal_status(),
+                },
+            )
+            return
+
+        from . import apply as kb_apply
+
+        try:
+            if operation == "dryrun":
+                ok, message = kb_apply.apply_proposal(pid, dry_run=True)
+            else:
+                ok, message = kb_apply.reject_proposal(pid, note)
+            self._send_json(
+                200 if ok else 409,
+                {"ok": ok, "op": operation, "id": pid, "message": message},
+            )
+        except Exception as exc:
+            self._send_json(
+                500,
+                {
+                    "ok": False,
+                    "op": operation,
+                    "id": pid,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
 
 
 def main():

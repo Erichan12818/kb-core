@@ -21,6 +21,7 @@ from .recall import (
     QDRANT_TIMEOUT,
     SPARSE_MODEL,
     retrieve,
+    retrieve_two_stage,
 )
 
 DEFAULT_TOP_K = 3
@@ -119,13 +120,31 @@ def category_rank(expected_category, hits):
     return None
 
 
-def evaluate_query(query_def, retriever, top_k, use_expected_category_filter):
+def evaluate_query(
+    query_def,
+    retriever,
+    top_k,
+    use_expected_category_filter,
+    two_stage=False,
+):
     client, models, dense, sparse = retriever
     query = (query_def.get("query") or "").strip()
     expected_category = query_def.get("expected_category")
     expected_keywords = query_def.get("expected_keywords") or []
     category_filter = expected_category if use_expected_category_filter else None
-    hits = retrieve(client, models, dense, sparse, query, category_filter, top_k)
+    category_guess = None
+    confidence = 1.0 if category_filter else 0.0
+    if two_stage:
+        outcome = retrieve_two_stage(
+            client, models, dense, sparse, query, None, top_k
+        )
+        hits = outcome["hits"]
+        category_guess = outcome["category_guess"]
+        confidence = outcome["confidence"]
+    else:
+        hits = retrieve(
+            client, models, dense, sparse, query, category_filter, top_k
+        )
     results = [hit_to_dict(hit, i + 1) for i, hit in enumerate(hits)]
     top_category = results[0].get("category") if results else None
     category_hit = top_category == expected_category
@@ -137,6 +156,8 @@ def evaluate_query(query_def, retriever, top_k, use_expected_category_filter):
         "expected_category": expected_category,
         "expected_keywords": expected_keywords,
         "notes": query_def.get("notes"),
+        "category_guess": category_guess,
+        "confidence": confidence,
         "top_category": top_category,
         "category_rank": rank,
         "category_hit": category_hit,
@@ -159,7 +180,7 @@ def render_markdown(report):
         f"- category 命中率：{report['category_hits']}/{report['total']}（top-1 屬 expected_category）",
         f"- category@{report['top_k']} 命中率：{report['category_hits_at_k']}/{report['total']}（top-{report['top_k']} 含 expected_category）",
         f"- keyword 命中率：{report['keyword_hits']}/{report['total']}（top-{report['top_k']} 含任一 expected_keyword）",
-        f"- 檢索模式：{'expected_category filter' if report['use_expected_category_filter'] else 'global'}",
+        f"- 檢索模式：{report['mode']}",
         f"- runtime：fastembed {report['runtime_versions'].get('fastembed')}, qdrant-client {report['runtime_versions'].get('qdrant-client')}",
         "",
         "## 逐題結果",
@@ -181,6 +202,10 @@ def render_markdown(report):
             f"### [{item['id']}] {item['query']}",
             f"expected_category: {item['expected_category']} | {category_mark} | rank: {item['category_rank'] or 'n/a'}",
             f"expected_keywords: {keywords} | {keyword_mark}",
+            (
+                f"category_guess: {item['category_guess'] or 'none'}"
+                f" | confidence: {item['confidence']:.3f}"
+            ),
             f"Top-{report['top_k']} 結果：",
         ])
         if not item["hits"]:
@@ -208,8 +233,15 @@ def main():
         action="store_true",
         help="每題用 expected_category 作 metadata filter，對照分類內檢索品質",
     )
+    ap.add_argument(
+        "--two-stage",
+        action="store_true",
+        help="不用 expected category；先由 TAXONOMY 猜類別，否則搜尋全庫",
+    )
     ap.add_argument("--json", action="store_true", help="輸出 JSON")
     args = ap.parse_args()
+    if args.use_expected_category_filter and args.two_stage:
+        ap.error("--two-stage 與 --use-expected-category-filter 不可同時使用")
 
     queries = load_yaml(args.queries)
     if args.category:
@@ -218,7 +250,13 @@ def main():
     retriever = init_retriever()
     try:
         results = [
-            evaluate_query(q, retriever, args.top_k, args.use_expected_category_filter)
+            evaluate_query(
+                q,
+                retriever,
+                args.top_k,
+                args.use_expected_category_filter,
+                args.two_stage,
+            )
             for q in queries
         ]
     except Exception as e:
@@ -229,6 +267,16 @@ def main():
         "queries_path": args.queries,
         "category_filter": args.category,
         "use_expected_category_filter": args.use_expected_category_filter,
+        "two_stage": args.two_stage,
+        "mode": (
+            "two-stage taxonomy routing"
+            if args.two_stage
+            else (
+                "expected_category filter"
+                if args.use_expected_category_filter
+                else "global"
+            )
+        ),
         "top_k": args.top_k,
         "total": len(results),
         "category_hits": sum(1 for r in results if r["category_hit"]),

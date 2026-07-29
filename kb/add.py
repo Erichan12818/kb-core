@@ -71,7 +71,20 @@ def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=F
 
     if ingest:
         if async_ingest:
-            subprocess.Popen([sys.executable, "-m", "kb.ingest"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Detached, but never silent: a background ingest that dies takes the
+            # note with it, and the caller has already been told "queued". Send
+            # both streams to a log the user can actually find.
+            log_path = Path(cfg("kb_root")) / "state" / "ingest_async.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log = open(log_path, "a", encoding="utf-8")
+            log.write(
+                f"\n===== {datetime.datetime.now().isoformat(timespec='seconds')} "
+                f"async ingest for {rel_file} =====\n"
+            )
+            log.flush()
+            subprocess.Popen(
+                [sys.executable, "-m", "kb.ingest"], stdout=log, stderr=subprocess.STDOUT
+            )
         else:
             subprocess.run([sys.executable, "-m", "kb.ingest"])
 
