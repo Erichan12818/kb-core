@@ -10,6 +10,10 @@ from pathlib import Path
 DEFAULTS = {
     "kb_root": "./vault",
     "qdrant": {
+        # server = talk to a Qdrant service; embedded = run in-process against
+        # a local directory (no server, no Docker, single process only).
+        "mode": "server",
+        "path": "",
         "host": "localhost",
         "port": 6333,
         "collection": "kb_hybrid_v2",

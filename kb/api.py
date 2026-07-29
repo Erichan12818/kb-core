@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .config import cfg
+from . import store
 
 UI_PATH = Path(__file__).with_name("static") / "ui.html"
 _RECALL = {}
@@ -134,11 +135,7 @@ def _recall_components():
         from . import recall as kb_recall
 
         _RECALL.update({
-            "client": QdrantClient(
-                host=kb_recall.QDRANT_HOST,
-                port=kb_recall.QDRANT_PORT,
-                timeout=kb_recall.QDRANT_TIMEOUT,
-            ),
+            "client": store.connect(kb_recall.QDRANT_TIMEOUT),
             "models": models,
             "dense": TextEmbedding(kb_recall.DENSE_MODEL),
             "sparse": SparseTextEmbedding(kb_recall.SPARSE_MODEL),
@@ -407,11 +404,11 @@ class Handler(BaseHTTPRequestHandler):
             )
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default=cfg("api.host", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=int(cfg("api.port", 8377)))
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     host = args.host or "127.0.0.1"
     server = ThreadingHTTPServer((host, args.port), Handler)

@@ -34,6 +34,15 @@ flowchart LR
     R --> U[HTTP clients]
 ```
 
+## Two ways to run it
+
+**Desktop app** — one download, no Docker. The vector store runs in-process and
+the UI opens in your browser. See [packaging/README.md](./packaging/README.md)
+to build one.
+
+**Docker Compose** — for a NAS or a machine that stays on, where the API and
+the worker run as separate services against a shared Qdrant.
+
 ## Quickstart
 
 Start with [QUICKSTART.md](./QUICKSTART.md). The shortest path is:

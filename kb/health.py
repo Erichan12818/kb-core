@@ -35,6 +35,25 @@ def _get(url, timeout=5):
         return json.loads(r.read().decode())
 
 
+def _qdrant_points():
+    """Point count, or None when the collection does not exist yet.
+
+    Embedded mode has no HTTP endpoint to probe, so it is asked through the
+    client instead of the REST URL.
+    """
+    from . import store
+
+    if store.is_embedded():
+        # Do not close: the embedded client is shared for the life of the
+        # process, and closing it here would break every later caller.
+        client = store.connect()
+        names = {c.name for c in client.get_collections().collections}
+        if cfg("qdrant.collection") not in names:
+            return None
+        return client.count(cfg("qdrant.collection"), exact=True).count
+    return _get(QDRANT_URL)["result"]["points_count"]
+
+
 def _vault_is_empty():
     """True when no source file has ever been added.
 
@@ -76,9 +95,15 @@ def check():
                   KB_ROOT)
 
     try:
-        d = _get(QDRANT_URL)
-        pts = d["result"]["points_count"]
-        if pts == 0 and empty:
+        pts = _qdrant_points()
+        if pts is None:
+            # Embedded store with no collection yet.
+            out["qdrant"] = (
+                empty,
+                "已連上，collection 未建（尚未加入任何筆記）" if empty
+                else "collection 未建，但 raw_files 已有內容——請跑 ingest",
+            )
+        elif pts == 0 and empty:
             out["qdrant"] = (True, "已連上，未有資料（尚未加入任何筆記）")
         else:
             out["qdrant"] = (pts > 0, f"{pts} points")

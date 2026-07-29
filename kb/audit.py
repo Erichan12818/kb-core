@@ -15,6 +15,7 @@ import os, re, sys, json, datetime
 from collections import defaultdict, Counter
 from pathlib import Path
 from . import index as ic
+from . import store
 from . import llm as llm_router
 from . import notify as kb_notify
 from . import proposals as pc
@@ -420,7 +421,7 @@ def sync_payload_topics(index, affected):
         return True
     try:
         from qdrant_client import QdrantClient
-        client = QdrantClient(host=ic.QDRANT_HOST, port=ic.QDRANT_PORT, timeout=ic.QDRANT_TIMEOUT)
+        client = store.connect(ic.QDRANT_TIMEOUT)
         for fn in affected:
             e = index[fn]
             ic.enrich_payload(client, e["category"], e.get("source_file", fn),

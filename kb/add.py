@@ -12,7 +12,7 @@ kb_add.py — 「丟即入」知識庫入口引擎（Scene01 #1#2，gateway 無�
   python kb_add.py "一段文字筆記" --category notes           # 純文字 → 入庫
   python kb_add.py "<url>" --category reference --no-ingest  # 只存檔，等排程灌
 """
-import os, re, sys, subprocess, datetime, argparse, urllib.parse
+import os, re, sys, subprocess, threading, datetime, argparse, urllib.parse
 from pathlib import Path
 from .config import cfg
 
@@ -56,6 +56,59 @@ def fetch_url(url):
         raise RuntimeError(f"抓網頁失敗：{(out.stderr or '空輸出')[:300]}")
     return out.stdout
 
+def _ingest_log(rel_file):
+    """Open the async ingest log. A background ingest that dies takes the note
+    with it, and the caller has already been told "queued", so neither stream
+    may be discarded."""
+    path = Path(cfg("kb_root")) / "state" / "ingest_async.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    log = open(path, "a", encoding="utf-8")
+    log.write(
+        f"\n===== {datetime.datetime.now().isoformat(timespec='seconds')} "
+        f"ingest for {rel_file} =====\n"
+    )
+    log.flush()
+    return log
+
+
+def _run_ingest(rel_file, background):
+    """Run ingest, as a thread or a subprocess depending on the store.
+
+    The embedded store admits one process, so spawning a second one would fail
+    on the directory lock — there, ingest has to share this process. Against a
+    server a subprocess is preferable: it cannot take the caller down with it.
+    """
+    from . import store
+
+    if store.is_embedded():
+        log = _ingest_log(rel_file)
+
+        def run():
+            from contextlib import redirect_stdout, redirect_stderr
+            from . import ingest as kb_ingest
+            try:
+                with redirect_stdout(log), redirect_stderr(log):
+                    kb_ingest.main()
+            except BaseException as e:          # SystemExit included
+                log.write(f"ingest ended: {type(e).__name__}: {e}\n")
+            finally:
+                log.flush()
+
+        if background:
+            threading.Thread(target=run, name="kb-ingest", daemon=True).start()
+        else:
+            run()
+        return
+
+    if background:
+        log = _ingest_log(rel_file)
+        subprocess.Popen(
+            [sys.executable, "-m", "kb.ingest"], stdout=log, stderr=subprocess.STDOUT
+        )
+    else:
+        subprocess.run([sys.executable, "-m", "kb.ingest"])
+
+
 def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=False):
     """把 URL/文字存入 raw_files，回入庫結果；外部依賴錯誤交由 caller 決定處理。"""
     Path(RAW_ROOT).mkdir(parents=True, exist_ok=True)
@@ -80,23 +133,7 @@ def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=F
     rel_file = f"{category}/{fn}"
 
     if ingest:
-        if async_ingest:
-            # Detached, but never silent: a background ingest that dies takes the
-            # note with it, and the caller has already been told "queued". Send
-            # both streams to a log the user can actually find.
-            log_path = Path(cfg("kb_root")) / "state" / "ingest_async.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log = open(log_path, "a", encoding="utf-8")
-            log.write(
-                f"\n===== {datetime.datetime.now().isoformat(timespec='seconds')} "
-                f"async ingest for {rel_file} =====\n"
-            )
-            log.flush()
-            subprocess.Popen(
-                [sys.executable, "-m", "kb.ingest"], stdout=log, stderr=subprocess.STDOUT
-            )
-        else:
-            subprocess.run([sys.executable, "-m", "kb.ingest"])
+        _run_ingest(rel_file, background=async_ingest)
 
     return {
         "file": rel_file,

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import cfg
+from . import store
 
 SERVER_VERSION = "0.1.0"
 _RECALL: dict[str, Any] = {}
@@ -67,11 +68,7 @@ def _components() -> dict[str, Any]:
             from . import recall
 
             _RECALL.update(
-                client=QdrantClient(
-                    host=recall.QDRANT_HOST,
-                    port=recall.QDRANT_PORT,
-                    timeout=recall.QDRANT_TIMEOUT,
-                ),
+                client=store.connect(recall.QDRANT_TIMEOUT),
                 models=models,
                 dense=TextEmbedding(recall.DENSE_MODEL),
                 sparse=SparseTextEmbedding(recall.SPARSE_MODEL),

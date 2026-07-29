@@ -27,6 +27,7 @@ from collections import Counter
 from pathlib import Path
 
 from .config import cfg
+from . import store
 
 QDRANT_HOST, QDRANT_PORT = cfg("qdrant.host"), cfg("qdrant.port")
 COLLECTION   = cfg("qdrant.collection")
@@ -373,7 +374,7 @@ def main():
     try:
         from qdrant_client import QdrantClient, models
         from fastembed import TextEmbedding, SparseTextEmbedding
-        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=QDRANT_TIMEOUT)
+        client = store.connect(QDRANT_TIMEOUT)
         dense = TextEmbedding(DENSE_MODEL)
         sparse = SparseTextEmbedding(SPARSE_MODEL)
         outcome = retrieve_two_stage(

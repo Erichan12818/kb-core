@@ -14,6 +14,7 @@ from datetime import datetime
 from importlib import metadata
 
 from .recall import (
+from . import store
     COLLECTION,
     DENSE_MODEL,
     QDRANT_HOST,
@@ -48,7 +49,7 @@ def init_retriever():
         from fastembed import SparseTextEmbedding, TextEmbedding
         from qdrant_client import QdrantClient, models
 
-        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=QDRANT_TIMEOUT)
+        client = store.connect(QDRANT_TIMEOUT)
         if not client.collection_exists(COLLECTION):
             raise RuntimeError(f"collection not found: {COLLECTION}")
         dense = TextEmbedding(DENSE_MODEL)

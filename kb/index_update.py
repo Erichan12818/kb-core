@@ -11,13 +11,14 @@ import sys, datetime
 from qdrant_client import QdrantClient
 from pathlib import Path
 from . import index as ic
+from . import store
 
 def main():
     force_all = "--all" in sys.argv
     today = datetime.date.today()
     review_by = (today + datetime.timedelta(days=ic.REVIEW_DAYS)).isoformat()
 
-    client = QdrantClient(host=ic.QDRANT_HOST, port=ic.QDRANT_PORT, timeout=ic.QDRANT_TIMEOUT)
+    client = store.connect(ic.QDRANT_TIMEOUT)
     files = ic.scan_collection(client)
     if not files:
         sys.exit("❌ collection 無資料，先跑 ingest.py")

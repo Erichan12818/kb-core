@@ -15,6 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from qdrant_client import QdrantClient, models
 from .config import cfg
+from . import store
 from . import llm as llm_router
 
 KB_ROOT   = cfg("kb_root")
@@ -129,7 +130,7 @@ def scan_collection(client):
 
 def compute_relations(files):
     """用 dense 向量算每檔關係：agg=排名(廣度)、peak=去重(單片最高)、cross_cat 標記。"""
-    client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=QDRANT_TIMEOUT)
+    client = store.connect(QDRANT_TIMEOUT)
     cat_of = {fn: f["category"] for fn, f in files.items()}
     # payload 只有 basename；碰撞時按鄰居 category 解回正確 key
     name_to_keys = defaultdict(list)

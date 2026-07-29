@@ -15,6 +15,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
 from fastembed import TextEmbedding, SparseTextEmbedding
 from .config import cfg
+from . import store
 
 # ==================== 設定 ====================
 # vault 下的原始檔庫；實際位置由 kb_config.yaml 的 kb_root 控制。
@@ -107,7 +108,7 @@ def main():
     if not os.path.isdir(SOURCE_ROOT):
         sys.exit(f"❌ 原始檔庫未掛載：{SOURCE_ROOT}（請先掛 SMB，或設 KB_ROOT 環境變數）")
 
-    client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=QDRANT_TIMEOUT)
+    client = store.connect(QDRANT_TIMEOUT)
     ensure_collection(client)
 
     # 載入 manifest（增量基準）
