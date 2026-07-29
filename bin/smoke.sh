@@ -75,17 +75,28 @@ echo "$ADD" | grep -q '"path"' || fail "POST /add returned no path: $ADD"
 pass "note written"
 
 step "Waiting for ingest (first run downloads the embedding model)"
+# Check the hits, not the whole response: /recall echoes the query back, so a
+# plain grep for the marker matches the request we just sent and reports
+# success while the collection is still empty.
 DEADLINE=$((SECONDS + INGEST_TIMEOUT))
 FOUND=0
 while [ $SECONDS -lt $DEADLINE ]; do
   BODY=$(curl -sf --max-time 300 -X POST "$API/recall" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$MARKER durable agent memory\",\"top_k\":3}" 2>/dev/null)
-  if echo "$BODY" | grep -q "$MARKER"; then FOUND=1; break; fi
+  if [ -n "$BODY" ] && printf '%s' "$BODY" | MARKER="$MARKER" python3 -c "
+import json, os, sys
+try:
+    hits = json.load(sys.stdin).get('hits') or []
+except Exception:
+    sys.exit(1)
+marker = os.environ['MARKER']
+sys.exit(0 if any(marker in (h.get('text') or '') for h in hits) else 1)
+"; then FOUND=1; break; fi
   sleep 15
 done
 [ "$FOUND" = "1" ] || fail "note never became searchable within ${INGEST_TIMEOUT}s"
-pass "note is searchable"
+pass "note is searchable (found in hits, not just the echoed query)"
 
 step "Checking surfaces"
 # Capture before matching: piping curl into `grep -q` makes grep exit on the
