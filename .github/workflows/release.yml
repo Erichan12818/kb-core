@@ -1,0 +1,175 @@
+name: Release
+
+# Builds the desktop app for every platform we ship. PyInstaller does not
+# cross-compile, so each one is built on its own runner — this workflow is the
+# reason a Windows build can exist without owning a Windows machine.
+#
+# Triggered by pushing a v* tag, or manually for a dry run.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build without publishing a release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS (Apple silicon)
+            artifact: kb-core-macos-arm64
+          - os: macos-13
+            label: macOS (Intel)
+            artifact: kb-core-macos-x64
+          - os: windows-latest
+            label: Windows
+            artifact: kb-core-windows-x64
+          - os: ubuntu-latest
+            label: Linux
+            artifact: kb-core-linux-x64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: pyinstaller packaging/kb-core.spec --noconfirm
+
+      # Proves the bundle starts and serves the UI. A build that imports
+      # cleanly on the builder but dies on a user's machine is the failure this
+      # is here to catch, and it costs seconds.
+      - name: Smoke test the bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          "dist/kb-core.app/Contents/MacOS/kb-core" --vault "$RUNNER_TEMP/vault" \
+            --port 8399 --no-browser --no-schedule &
+          for _ in $(seq 1 60); do
+            curl -sf --max-time 3 http://127.0.0.1:8399/health >/dev/null && break
+            sleep 5
+          done
+          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q kb-core
+          curl -sf --max-time 10 http://127.0.0.1:8399/health >/dev/null
+          echo "bundle starts and serves the UI"
+
+      - name: Smoke test the bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./dist/kb-core/kb-core --vault "$RUNNER_TEMP/vault" \
+            --port 8399 --no-browser --no-schedule &
+          for _ in $(seq 1 60); do
+            curl -sf --max-time 3 http://127.0.0.1:8399/health >/dev/null && break
+            sleep 5
+          done
+          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q kb-core
+          curl -sf --max-time 10 http://127.0.0.1:8399/health >/dev/null
+          echo "bundle starts and serves the UI"
+
+      - name: Smoke test the bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Start-Process -PassThru -FilePath "dist\kb-core\kb-core.exe" `
+            -ArgumentList "--vault","$env:RUNNER_TEMP\vault","--port","8399","--no-browser","--no-schedule"
+          $ok = $false
+          foreach ($i in 1..60) {
+            try {
+              Invoke-WebRequest -Uri http://127.0.0.1:8399/health -TimeoutSec 3 -UseBasicParsing | Out-Null
+              $ok = $true; break
+            } catch { Start-Sleep -Seconds 5 }
+          }
+          if (-not $ok) { $app | Stop-Process -Force; throw "bundle never became reachable" }
+          $ui = Invoke-WebRequest -Uri http://127.0.0.1:8399/ui -TimeoutSec 10 -UseBasicParsing
+          if ($ui.Content -notmatch "kb-core") { $app | Stop-Process -Force; throw "UI not served" }
+          $app | Stop-Process -Force
+          Write-Host "bundle starts and serves the UI"
+
+      # Signing is skipped until the secrets exist rather than failing the
+      # build: an unsigned artifact people can still open beats no artifact.
+      # macOS needs a "Developer ID Application" certificate — the Development
+      # and Distribution certs used for the App Store will not do.
+      - name: Sign and notarize (macOS)
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != ''
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          rm -f /tmp/cert.p12
+          codesign --force --deep --options runtime --timestamp \
+            --sign "$MACOS_SIGN_IDENTITY" "dist/kb-core.app"
+          ditto -c -k --keepParent "dist/kb-core.app" /tmp/notarize.zip
+          xcrun notarytool submit /tmp/notarize.zip \
+            --apple-id "$MACOS_NOTARY_APPLE_ID" \
+            --password "$MACOS_NOTARY_PASSWORD" \
+            --team-id "$MACOS_NOTARY_TEAM_ID" --wait
+          xcrun stapler staple "dist/kb-core.app"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/kb-core.app" "${{ matrix.artifact }}.zip"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar czf "${{ matrix.artifact }}.tar.gz" -C dist kb-core
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\kb-core\* -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
