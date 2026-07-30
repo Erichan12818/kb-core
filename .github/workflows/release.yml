@@ -32,16 +32,22 @@ jobs:
           - os: macos-latest
             label: macOS (Apple silicon)
             artifact: kb-core-macos-arm64
-          - os: macos-13
-            label: macOS (Intel)
-            artifact: kb-core-macos-x64
+          # macOS Intel is out for now: the macos-13 runner sat queued for
+          # 40+ minutes across two runs while the others started in seconds,
+          # and holding a release for a runner that may never allocate helps
+          # nobody. Intel Macs can run the Compose deployment meanwhile.
+          # - os: macos-13
+          #   label: macOS (Intel)
+          #   artifact: kb-core-macos-x64
           - os: ubuntu-latest
             label: Linux
             artifact: kb-core-linux-x64
-          # Windows is deliberately not built yet. The runner reached the build
-          # step and failed there, and shipping a platform nobody has verified
-          # end to end is worse than saying it is not ready. The Windows steps
-          # below are kept so re-enabling it is one matrix entry, not a rewrite.
+          # Windows is off for now. PyInstaller produced a bundle — the failure
+          # was the smoke test: the .exe started but never answered /health
+          # within the 5-minute wait. Two candidates, untested: the first-run
+          # model download takes longer on this runner than the wait allows, or
+          # the frozen build does not actually start there. Re-enabling means
+          # uncommenting this entry and lengthening the Windows wait first.
           # - os: windows-latest
           #   label: Windows
           #   artifact: kb-core-windows-x64
