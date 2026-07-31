@@ -25,6 +25,11 @@ jobs:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    # Job-level env is the only scope a step's `if` can read a secret through.
+    # The value is a boolean, not the certificate: `if` conditions are visible
+    # in the run log.
+    env:
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -120,8 +125,15 @@ jobs:
       # build: an unsigned artifact people can still open beats no artifact.
       # macOS needs a "Developer ID Application" certificate — the Development
       # and Distribution certs used for the App Store will not do.
+      #
+      # The gate reads HAS_MACOS_CERT, set at job level. A step's `if` cannot
+      # see that step's own `env` block, and the `secrets` context is out of
+      # scope in a step `if` entirely — so the original
+      # `env.MACOS_CERT_P12 != ''` was always false. Signing would have stayed
+      # silently skipped even once all six secrets were in place, and the
+      # release would have kept shipping unsigned artifacts with no warning.
       - name: Sign and notarize (macOS)
-        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != ''
+        if: runner.os == 'macOS' && env.HAS_MACOS_CERT == 'true'
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -146,6 +158,40 @@ jobs:
             --password "$MACOS_NOTARY_PASSWORD" \
             --team-id "$MACOS_NOTARY_TEAM_ID" --wait
           xcrun stapler staple "dist/kb-core.app"
+
+      # A double-click is not what the smoke test above exercises: it runs the
+      # inner binary from a shell, which has a terminal and bypasses Gatekeeper
+      # entirely. These are the two bundle properties that decide whether a
+      # Finder launch can show the user anything at all, and getting them wrong
+      # is what made v0.2.0 hang silently on first run.
+      - name: Check the bundle can talk to a user (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          plist="dist/kb-core.app/Contents/Info.plist"
+          for key in LSBackgroundOnly LSUIElement; do
+            value=$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist" 2>/dev/null || echo missing)
+            echo "$key = $value"
+            if [ "$value" != "false" ]; then
+              echo "::error::$key is '$value'; it must be false. A background-only" \
+                   "bundle owns no window, so a failed launch shows the user nothing."
+              exit 1
+            fi
+          done
+
+      # Unsigned is a supported outcome — it is not one that should be
+      # discovered by a user whose Mac refuses to open the app.
+      - name: Report signing status (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if codesign -dv --verbose=2 "dist/kb-core.app" 2>&1 | grep -q "adhoc"; then
+            echo "::warning::Shipping an UNSIGNED (adhoc) macOS build. Gatekeeper" \
+                 "will refuse to open it on first launch and users must clear" \
+                 "quarantine by hand. Add the six MACOS_* secrets to fix this."
+          else
+            codesign -dv --verbose=2 "dist/kb-core.app"
+            spctl -a -vvv -t exec "dist/kb-core.app"
+            echo "signed and accepted by Gatekeeper"
+          fi
 
       - name: Package (macOS)
         if: runner.os == 'macOS'

@@ -7,14 +7,22 @@ lives in this one process — the HTTP server on a loopback port, the schedules 
 a background thread, and the browser pointed at the local UI.
 
 First launch has nothing to show for a few minutes while the embedding model
-downloads, so it reports progress on the console it was started from and in the
-window itself, rather than looking hung.
+downloads. Reporting that on the console is not enough: a Finder double-click
+attaches no console, which is how the first release turned every startup
+failure into a silent hang. Progress goes to a log file in the vault, failures
+go to a native dialog, and the browser is not opened until the server actually
+answers — see kb.desktop_report.
 """
 import os
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
+
+from .desktop_report import fatal, report, set_log_path
 
 APP_NAME = "kb-core"
 
@@ -81,7 +89,7 @@ def prepare_vault(vault):
         (vault / name).mkdir(parents=True, exist_ok=True)
 
 
-def warm_models(report):
+def warm_models():
     """Load the embedding models so the first search is not the one that waits.
 
     This is the ~2.3GB download on a fresh install. It happens on a background
@@ -100,7 +108,7 @@ def warm_models(report):
         report(f"Could not prepare the search index: {type(e).__name__}: {e}")
 
 
-def run_schedules(report):
+def run_schedules():
     """The worker loop, in-process. Failure here must not take the UI down."""
     try:
         from . import worker
@@ -108,6 +116,34 @@ def run_schedules(report):
         worker.main()
     except Exception as e:
         report(f"Background schedule stopped: {type(e).__name__}: {e}")
+
+
+def wait_until_serving(port, timeout=90.0):
+    """Block until the loopback server answers, so the browser opens on a page.
+
+    Opening the browser on a fixed 1.5s timer raced the server: on a cold start
+    the user got a connection-refused page and no reason to try again.
+    """
+    url = f"http://127.0.0.1:{port}/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2):
+                return True
+        except urllib.error.HTTPError:
+            # Answering at all is the signal; an unhealthy body still means the
+            # port is live and the UI is worth opening.
+            return True
+        except Exception:
+            time.sleep(0.4)
+    return False
+
+
+def open_when_ready(port, url):
+    if wait_until_serving(port):
+        webbrowser.open(url)
+    else:
+        report(f"Server did not become reachable; open {url} manually.")
 
 
 def main(argv=None):
@@ -121,14 +157,29 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     vault = Path(os.path.expanduser(args.vault)) if args.vault else default_vault()
-    config_path = ensure_config(vault)
-    # kb.config reads these at import time, so they have to be set first.
-    os.environ["KB_CONFIG"] = str(config_path)
-    os.environ["KB_ROOT"] = str(vault)
-    prepare_vault(vault)
 
-    def report(message):
-        print(f"[{APP_NAME}] {message}", flush=True)
+    # The log is opened before anything that can fail, so that a launch which
+    # dies during configuration still leaves a trace to read afterwards.
+    try:
+        log = set_log_path(vault / "logs" / "kb-core.log")
+    except Exception:
+        log = None
+
+    try:
+        config_path = ensure_config(vault)
+        # kb.config reads these at import time, so they have to be set first.
+        os.environ["KB_CONFIG"] = str(config_path)
+        os.environ["KB_ROOT"] = str(vault)
+        prepare_vault(vault)
+    except OSError as e:
+        fatal(
+            "Cannot use the data folder",
+            f"{vault}\n\n{type(e).__name__}: {e}\n\n"
+            "If the app was opened straight from the download, move it to "
+            "Applications first.",
+            log,
+        )
+        return 1
 
     from .config import cfg
     from . import store
@@ -139,18 +190,32 @@ def main(argv=None):
     report(f"Vault:  {vault}")
     report(f"Store:  {store.describe()}")
     report(f"Config: {config_path}")
+    if log:
+        report(f"Log:    {log}")
 
-    threading.Thread(target=warm_models, args=(report,), daemon=True).start()
+    threading.Thread(target=warm_models, daemon=True).start()
     if not args.no_schedule:
-        threading.Thread(target=run_schedules, args=(report,), daemon=True).start()
+        threading.Thread(target=run_schedules, daemon=True).start()
     if not args.no_browser:
-        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+        threading.Thread(target=open_when_ready, args=(port, url), daemon=True).start()
 
     report(f"Open {url}")
     from . import api
 
-    api.main(["--port", str(port), "--host", "127.0.0.1"])
+    try:
+        api.main(["--port", str(port), "--host", "127.0.0.1"])
+    except OSError as e:
+        # Almost always the port already being held — including by a second
+        # copy of this app, which the embedded store cannot share.
+        fatal(
+            "Cannot start the server",
+            f"Port {port} is not available.\n\n{type(e).__name__}: {e}\n\n"
+            "kb-core may already be running. Open " + url + " to check.",
+            log,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

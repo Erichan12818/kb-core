@@ -56,7 +56,11 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=True,          # first run prints model-download progress
+    # Keeps the binary usable from a terminal. It is NOT how a Finder launch
+    # reports progress: double-clicking attaches no terminal, so stdout goes
+    # nowhere. kb.desktop mirrors every line to a log file and raises a native
+    # dialog on failure — that is the path a double-click actually takes.
+    console=True,
 )
 
 coll = COLLECT(
@@ -78,7 +82,14 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "kb-core",
             "CFBundleShortVersionString": "0.1.0",
             "NSHighResolutionCapable": True,
-            # No dock icon: this is a background service with a browser UI.
+            # console=True makes PyInstaller default LSBackgroundOnly to true,
+            # which is what turned a failed first launch into a silent hang:
+            # a background-only process owns no window, so neither Gatekeeper
+            # nor the app itself could put anything on screen. The user saw no
+            # window, no error, and no port — nothing to distinguish "still
+            # downloading the model" from "dead". Both keys are pinned false so
+            # the app is a real foreground app that can present a dialog.
+            "LSBackgroundOnly": False,
             "LSUIElement": False,
         },
     )
