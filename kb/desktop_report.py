@@ -90,17 +90,38 @@ def alert(title, message):
         if sys.platform == "darwin":
             # osascript rather than a GUI toolkit: it is always present, and it
             # works from a process that has not finished starting up.
-            script = (
+            #
+            # Two forms, because a plain `display dialog` is shown by osascript
+            # itself, and osascript owns no GUI when it is spawned by a process
+            # the window server does not consider frontmost — it fails in
+            # milliseconds. Handing the dialog to System Events puts it up
+            # regardless. The plain form is tried first: it needs no Apple
+            # Events permission, so when it works it is the quieter path.
+            body = _as_applescript(detail)
+            head = _as_applescript(title)
+            common = (
                 'display dialog {msg} with title {title} '
-                "buttons {\"OK\"} default button \"OK\" with icon caution"
-            ).format(msg=_as_applescript(detail), title=_as_applescript(title))
-            subprocess.run(
-                ["/usr/bin/osascript", "-e", script],
-                timeout=300,
-                check=False,
-                capture_output=True,
-            )
-            return True
+                'buttons {{"OK"}} default button "OK" with icon caution'
+            ).format(msg=body, title=head)
+            for label, script in (
+                ("direct", common),
+                ("system-events", f'tell application "System Events" to {common}'),
+            ):
+                result = subprocess.run(
+                    ["/usr/bin/osascript", "-e", script],
+                    timeout=300,
+                    check=False,
+                    capture_output=True,
+                )
+                if result.returncode == 0:
+                    return True
+                # Never swallow this: a failed alert is the failure that hides
+                # every other failure.
+                _write(
+                    f"[{APP_NAME}] alert via {label} failed rc={result.returncode} "
+                    f"{result.stderr.decode('utf-8', 'replace').strip()[:300]}"
+                )
+            return False
         if os.name == "nt":
             import ctypes
 
