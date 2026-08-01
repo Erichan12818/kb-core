@@ -80,7 +80,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "kb-core",
             "CFBundleDisplayName": "kb-core",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": "0.2.1",
             "NSHighResolutionCapable": True,
             # console=True makes PyInstaller default LSBackgroundOnly to true,
             # which is what turned a failed first launch into a silent hang:
