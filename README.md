@@ -36,16 +36,31 @@ flowchart LR
 
 ## Two ways to run it
 
-**Desktop app** — one download, no Docker. The vector store runs in-process and
-the UI opens in your browser. See [packaging/README.md](./packaging/README.md)
-to build one.
+**Desktop app** — one download, no Docker, no Python. The vector store runs
+in-process and the UI opens in your browser. Packaged for end users as
+**[Almanac](https://mybuilt.app/almanac/)**; kb-core is the engine inside it.
+
+- [macOS (Apple silicon)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-macos-arm64.zip)
+- [Linux (x86-64)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-linux-x64.tar.gz)
+
+The macOS build is not yet signed with a Developer ID, so Gatekeeper blocks the
+first launch. Approve it under System Settings > Privacy & Security > Open
+Anyway, or clear the quarantine attribute:
+
+```bash
+xattr -d com.apple.quarantine /Applications/kb-core.app
+```
+
+Control-clicking the app and choosing Open does *not* work on macOS 15 or
+later — Apple removed that bypass. To build a bundle yourself instead, see
+[packaging/README.md](./packaging/README.md).
 
 **Docker Compose** — for a NAS or a machine that stays on, where the API and
 the worker run as separate services against a shared Qdrant.
 
 ## Quickstart
 
-Start with [QUICKSTART.md](./QUICKSTART.md). The shortest path is:
+Start with [QUICKSTART.md](./QUICKSTART.md). With Compose the shortest path is:
 
 ```bash
 cp config/kb_config.example.yaml config/kb_config.yaml
