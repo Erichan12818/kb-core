@@ -2,6 +2,21 @@
 
 kb-core is the distributable package form of the NAS-to-Qdrant KB toolchain: a local Qdrant-backed long-term memory layer for coding agents.
 
+This page covers the Compose deployment, which is what you want for a NAS or a
+machine that stays on.
+
+**If you just want to try it, don't start here.** Download the desktop build
+instead — no config, no Docker, no Python, and it opens its own UI:
+
+- [macOS (Apple silicon)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-macos-arm64.zip)
+- [Linux (x86-64)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-linux-x64.tar.gz)
+
+Unpack it, run it, and it serves <http://127.0.0.1:8377/ui>. First launch
+downloads a ~2.3GB embedding model; progress goes to
+`~/Library/Application Support/kb-core/logs/kb-core.log` on macOS. The macOS
+build is unsigned, so see the [README](./README.md#two-ways-to-run-it) for the
+one-time Gatekeeper approval.
+
 ## 1. Prepare config
 
 ```bash
