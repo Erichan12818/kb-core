@@ -13,8 +13,8 @@ import sys
 from datetime import datetime
 from importlib import metadata
 
-from .recall import (
 from . import store
+from .recall import (
     COLLECTION,
     DENSE_MODEL,
     QDRANT_HOST,

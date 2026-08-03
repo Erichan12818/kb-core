@@ -1,0 +1,97 @@
+"""Unified kb-core command-line interface."""
+import argparse
+import sys
+
+
+def _run(module_name, argv):
+    old = sys.argv
+    sys.argv = [f"kb {module_name}"] + argv
+    try:
+        module = __import__(f"kb.{module_name}", fromlist=["main"])
+        return module.main()
+    finally:
+        sys.argv = old
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="kb")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("add", help="add URL or text into raw_files")
+    p.add_argument("content")
+    p.add_argument("--category", default="inbox")
+    p.add_argument("--title")
+    p.add_argument("--no-ingest", action="store_true")
+
+    p = sub.add_parser("recall", help="retrieve KB context")
+    p.add_argument("query")
+    p.add_argument("--category")
+    p.add_argument("--top-k", type=int)
+    p.add_argument("--json", action="store_true")
+
+    sub.add_parser("ingest", help="run ingest once")
+    sub.add_parser("catalog", help="render catalog once")
+    sub.add_parser("audit", help="run taxonomy audit once")
+    sub.add_parser("health", help="run health check")
+    sub.add_parser("eval", help="run recall eval")
+
+    p = sub.add_parser("proposals", help="review taxonomy proposals")
+    proposal_sub = p.add_subparsers(dest="proposal_cmd", required=True)
+    proposal_sub.add_parser("list", help="list pending proposals")
+    proposal_apply = proposal_sub.add_parser("apply", help="apply a proposal")
+    proposal_apply.add_argument("id")
+    proposal_apply.add_argument("--dry-run", action="store_true")
+    proposal_reject = proposal_sub.add_parser("reject", help="reject a proposal")
+    proposal_reject.add_argument("id")
+    proposal_reject.add_argument("note", nargs="*")
+
+    p = sub.add_parser("serve", help="serve HTTP API")
+    p.add_argument("--host")
+    p.add_argument("--port", type=int)
+
+    sub.add_parser("worker", help="run schedule worker")
+    sub.add_parser("mcp", help="serve MCP over stdio")
+
+    args, rest = parser.parse_known_args()
+
+    if args.cmd == "add":
+        argv = [args.content, "--category", args.category]
+        if args.title:
+            argv += ["--title", args.title]
+        if args.no_ingest:
+            argv.append("--no-ingest")
+        return _run("add", argv + rest)
+    if args.cmd == "recall":
+        argv = [args.query]
+        if args.category:
+            argv += ["--category", args.category]
+        if args.top_k:
+            argv += ["--top-k", str(args.top_k)]
+        if args.json:
+            argv.append("--json")
+        return _run("recall", argv + rest)
+    if args.cmd == "serve":
+        argv = []
+        if args.host:
+            argv += ["--host", args.host]
+        if args.port:
+            argv += ["--port", str(args.port)]
+        return _run("api", argv + rest)
+    if args.cmd == "proposals":
+        argv = [args.proposal_cmd]
+        if args.proposal_cmd in ("apply", "reject"):
+            argv.append(args.id)
+        if args.proposal_cmd == "apply" and args.dry_run:
+            argv.append("--dry-run")
+        if args.proposal_cmd == "reject" and args.note:
+            argv += args.note
+        return _run("apply", argv + rest)
+    if args.cmd == "worker":
+        return _run("worker", rest)
+    if args.cmd == "mcp":
+        return _run("mcp", rest)
+    return _run(args.cmd, rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
