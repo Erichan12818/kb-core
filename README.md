@@ -69,6 +69,19 @@ Control-clicking the app and choosing Open does *not* work on macOS 15 or
 later — Apple removed that bypass, and the menu item silently does nothing. To
 build a bundle yourself instead, see [packaging/README.md](./packaging/README.md).
 
+**pip / pipx / uvx** — no Gatekeeper at all, because there is no unsigned
+binary to approve. Not yet published to PyPI; until then, install straight
+from this repo:
+
+```bash
+pipx install "git+https://github.com/Erichan12818/kb-core.git"
+kb-core --vault ~/kb-vault
+```
+
+This gives you the same `kb-core` (server) and `kb` (CLI: add, recall,
+health, …) entry points as the packaged app, with no quarantine step because
+there is nothing macOS considers downloaded software.
+
 **Docker Compose** — for a NAS or a machine that stays on, where the API and
 the worker run as separate services against a shared Qdrant.
 
