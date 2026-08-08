@@ -34,10 +34,24 @@ flowchart LR
     R --> U[HTTP clients]
 ```
 
-## Two ways to run it
+## Three ways to run it
 
-**Desktop app** — one download, no Docker, no Python. The vector store runs
-in-process and the UI opens in your browser. Packaged for end users as
+**pip / pipx / uvx** — the fastest path if you already live in a terminal.
+No Gatekeeper, no unsigned binary to approve, because there is nothing macOS
+considers downloaded software:
+
+```bash
+pipx install "git+https://github.com/Erichan12818/kb-core.git"
+kb-core --vault ~/kb-vault
+```
+
+This gives you the `kb-core` (server) and `kb` (CLI: add, recall, health, …)
+entry points. Not yet published to PyPI; once it is, the same command becomes
+`pipx install kb-core`.
+
+**Desktop app** — one download, no Docker, no Python, for anyone who would
+rather not touch a terminal at all. The vector store runs in-process and the
+UI opens in your browser. Packaged for end users as
 **[Almanac](https://mybuilt.app/almanac/)**; kb-core is the engine inside it.
 
 - [macOS (Apple silicon)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-macos-arm64.zip)
@@ -68,19 +82,6 @@ the app and re-extract a fresh copy from the archive.
 Control-clicking the app and choosing Open does *not* work on macOS 15 or
 later — Apple removed that bypass, and the menu item silently does nothing. To
 build a bundle yourself instead, see [packaging/README.md](./packaging/README.md).
-
-**pip / pipx / uvx** — no Gatekeeper at all, because there is no unsigned
-binary to approve. Not yet published to PyPI; until then, install straight
-from this repo:
-
-```bash
-pipx install "git+https://github.com/Erichan12818/kb-core.git"
-kb-core --vault ~/kb-vault
-```
-
-This gives you the same `kb-core` (server) and `kb` (CLI: add, recall,
-health, …) entry points as the packaged app, with no quarantine step because
-there is nothing macOS considers downloaded software.
 
 **Docker Compose** — for a NAS or a machine that stays on, where the API and
 the worker run as separate services against a shared Qdrant.
