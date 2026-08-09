@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install metadata parser
+        run: python -m pip install --disable-pip-version-check PyYAML
+
+      - name: Compile Python
+        run: python -m compileall -q kb tests
+
+      - name: Run protocol tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate JSON and YAML
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          import yaml
+
+          for path in Path("plugins/claude-code").rglob("*.json"):
+              json.loads(path.read_text(encoding="utf-8"))
+          for root in (Path("config"), Path(".github/workflows")):
+              for path in root.rglob("*.yml"):
+                  yaml.safe_load(path.read_text(encoding="utf-8"))
+              for path in root.rglob("*.yaml"):
+                  yaml.safe_load(path.read_text(encoding="utf-8"))
+
+      - name: Validate shell scripts
+        run: find plugins/claude-code -type f -name '*.sh' -exec bash -n {} +
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet

@@ -1,6 +1,6 @@
 # Release Checklist
 
-This directory is a private release staging area. It has no Git remote and no commit yet.
+The first private repository baseline is published as annotated tag `v0.1.0` at commit `c7555fd`.
 
 ## Completed
 
@@ -14,13 +14,20 @@ This directory is a private release staging area. It has no Git remote and no co
 - MCP initialize and tools-list handshake.
 - Private path, LAN address, and credential-pattern scan.
 
-## Maintainer decisions before publication
+## Confirmed maintainer decisions
 
-- Confirm the public repository and product name (`kb-core` is the working name).
-- Confirm `Copyright (c) 2026 Eric Chan` in the MIT License.
-- Choose the GitHub owner/organization and repository visibility.
-- Decide whether the first release is `v0.1.0` and whether to publish a container image.
-- Review launch copy and select channels.
+- Product and repository name: `kb-core`.
+- License: MIT, `Copyright (c) 2026 Eric Chan`.
+- GitHub repository: `Erichan12818/kb-core`, private.
+- Initial version: `v0.1.0`.
+- Container image: not published.
+- GitHub Release: private draft created; not published.
+
+## Decisions still required
+
+- Review launch copy and select public channels.
+- Complete a public-readiness review before changing visibility.
+- Select a container registry before publishing an image.
 
 ## Final commands
 
@@ -32,4 +39,4 @@ claude plugin validate plugins/claude-code
 git add -n .
 ```
 
-Do not add a remote, commit, push, or publish until the maintainer decisions above are confirmed.
+Do not publish a GitHub Release, container image, or public repository without explicit maintainer approval.
