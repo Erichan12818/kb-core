@@ -57,31 +57,13 @@ UI opens in your browser. Packaged for end users as
 - [macOS (Apple silicon)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-macos-arm64.zip)
 - [Linux (x86-64)](https://github.com/Erichan12818/kb-core/releases/latest/download/kb-core-linux-x64.tar.gz)
 
-The macOS build is not yet signed with a Developer ID, so Gatekeeper blocks the
-first launch. **Clear the quarantine attribute before you open it the first
-time** — the order matters:
+As of v0.2.2 the macOS build is signed with a Developer ID and notarized, so
+it opens the way any downloaded Mac app does: double-click, macOS shows the
+one-time "downloaded from the internet" confirmation, click Open. No `xattr`,
+no System Settings detour. (Releases before v0.2.2 were unsigned and needed
+that detour — if you're on an older build, grab the latest one instead.)
 
-```bash
-xattr -dr com.apple.quarantine /Applications/kb-core.app
-```
-
-Tested on macOS 26:
-
-| what you do | result |
-| --- | --- |
-| open it while quarantined | hangs in dyld, no window, no error |
-| `xattr -dr` first, then open | works |
-| open it first, then `xattr -dr` | still blocked |
-| …plus copy the bundle somewhere new | works |
-
-macOS caches the refusal, so clearing the attribute after Gatekeeper has
-already turned the app away does not undo it. If you are in that state, either
-approve it under System Settings > Privacy & Security > Open Anyway, or delete
-the app and re-extract a fresh copy from the archive.
-
-Control-clicking the app and choosing Open does *not* work on macOS 15 or
-later — Apple removed that bypass, and the menu item silently does nothing. To
-build a bundle yourself instead, see [packaging/README.md](./packaging/README.md).
+To build a bundle yourself, see [packaging/README.md](./packaging/README.md).
 
 **Docker Compose** — for a NAS or a machine that stays on, where the API and
 the worker run as separate services against a shared Qdrant.
