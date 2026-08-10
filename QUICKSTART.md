@@ -14,8 +14,8 @@ instead — no config, no Docker, no Python, and it opens its own UI:
 Unpack it, run it, and it serves <http://127.0.0.1:8377/ui>. First launch
 downloads a ~2.3GB embedding model; progress goes to
 `~/Library/Application Support/kb-core/logs/kb-core.log` on macOS. The macOS
-build is unsigned, so see the [README](./README.md#two-ways-to-run-it) for the
-one-time Gatekeeper approval.
+build is signed and notarized as of v0.2.2, so opening it is the normal
+double-click-then-confirm flow — no extra steps.
 
 ## 1. Prepare config
 
