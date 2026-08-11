@@ -210,7 +210,7 @@ def main(argv=None):
         fatal(
             "Cannot start the server",
             f"Port {port} is not available.\n\n{type(e).__name__}: {e}\n\n"
-            "kb-core may already be running. Open " + url + " to check.",
+            "Almanac may already be running. Open " + url + " to check.",
             log,
         )
         return 1

@@ -85,7 +85,7 @@ jobs:
             curl -sf --max-time 3 http://127.0.0.1:8399/health >/dev/null && break
             sleep 5
           done
-          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q kb-core
+          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q Almanac
           curl -sf --max-time 10 http://127.0.0.1:8399/health >/dev/null
           echo "bundle starts and serves the UI"
 
@@ -98,7 +98,7 @@ jobs:
             curl -sf --max-time 3 http://127.0.0.1:8399/health >/dev/null && break
             sleep 5
           done
-          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q kb-core
+          curl -sf --max-time 10 http://127.0.0.1:8399/ui | grep -q Almanac
           curl -sf --max-time 10 http://127.0.0.1:8399/health >/dev/null
           echo "bundle starts and serves the UI"
 
@@ -117,7 +117,7 @@ jobs:
           }
           if (-not $ok) { $app | Stop-Process -Force; throw "bundle never became reachable" }
           $ui = Invoke-WebRequest -Uri http://127.0.0.1:8399/ui -TimeoutSec 10 -UseBasicParsing
-          if ($ui.Content -notmatch "kb-core") { $app | Stop-Process -Force; throw "UI not served" }
+          if ($ui.Content -notmatch "Almanac") { $app | Stop-Process -Force; throw "UI not served" }
           $app | Stop-Process -Force
           Write-Host "bundle starts and serves the UI"
 

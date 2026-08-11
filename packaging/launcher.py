@@ -37,7 +37,7 @@ def _fallback_report(title, detail):
                 [
                     "/usr/bin/osascript",
                     "-e",
-                    f'display dialog {quoted} with title "kb-core" '
+                    f'display dialog {quoted} with title "Almanac" '
                     'buttons {"OK"} default button "OK" with icon stop',
                 ],
                 check=False,
@@ -53,7 +53,7 @@ def main():
         from kb.desktop import main as desktop_main
     except Exception:
         _fallback_report(
-            "kb-core could not start",
+            "Almanac could not start",
             "A required component is missing from this build.\n\n"
             f"{traceback.format_exc()}\n"
             f"Please report this at {ISSUES_URL}",
@@ -69,12 +69,12 @@ def main():
             from kb.desktop_report import fatal, log_path
 
             fatal(
-                "kb-core stopped unexpectedly",
+                "Almanac stopped unexpectedly",
                 f"{traceback.format_exc()}\nPlease report this at {ISSUES_URL}",
                 log_path(),
             )
         except Exception:
-            _fallback_report("kb-core stopped unexpectedly", traceback.format_exc())
+            _fallback_report("Almanac stopped unexpectedly", traceback.format_exc())
         return 1
 
 

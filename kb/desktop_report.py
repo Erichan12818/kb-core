@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 APP_NAME = "kb-core"
+DISPLAY_NAME = "Almanac"  # what the user sees; APP_NAME is the engine/data-folder name
 
 _lock = threading.Lock()
 _log_path = None
@@ -161,4 +162,4 @@ def fatal(title, message, log=None):
         body = message
         if log:
             body += f"\n\nFull log:\n{log}"
-        alert(f"{APP_NAME} — {title}", body)
+        alert(f"{DISPLAY_NAME} — {title}", body)
