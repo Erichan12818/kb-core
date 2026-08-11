@@ -279,15 +279,15 @@ class Handler(BaseHTTPRequestHandler):
         """Apply settings from the UI form. The key is write-only over HTTP."""
         from . import settings as kb_settings
 
-        ok, message, current = kb_settings.write_settings(
-            base_url=body.get("base_url"),
-            model=body.get("model"),
-            api_key=body.get("api_key"),
-            chat_enabled=body.get("chat_enabled"),
-        )
+        ok, message, current, restart_needed = kb_settings.write_settings(body)
         self._send_json(
             200 if ok else 400,
-            {"ok": ok, "message": message, "settings": current},
+            {
+                "ok": ok,
+                "message": message,
+                "settings": current,
+                "restart_needed": restart_needed,
+            },
         )
 
     def _post_chat(self, body):

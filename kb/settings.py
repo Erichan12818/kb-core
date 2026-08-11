@@ -6,7 +6,7 @@ uncommenting a role, and exporting an environment variable — three steps in tw
 places, none of them discoverable from the app. This module is the backing for
 a Settings panel that does the same thing through a form.
 
-Two rules shape what is here:
+Three rules shape what is here:
 
 The API key never goes into kb_config.yaml. That file is the one a user is
 likely to paste into an issue or commit to a dotfiles repo. The key is written
@@ -16,6 +16,18 @@ which is the indirection kb.llm already supports.
 The key never travels back to the browser. :func:`read_settings` reports
 whether a key is present, never what it is — the same rule kb.chat states for
 the provider path.
+
+Settings that cannot take effect until the process restarts say so rather than
+appearing to apply. The vault location is the sharpest case: it is read once at
+launch, and changing it does not move the data that is already in the old one.
+
+Deliberately not exposed here: the embedding models, vector dimension, and
+chunking. Changing any of those invalidates every vector already stored, so the
+knowledge base would have to be re-indexed to be searchable again — that is a
+migration, not a setting. The Qdrant mode/host/port are likewise a deployment
+decision the desktop build has already made. ``api.host`` stays out because
+widening it past loopback exposes an unauthenticated knowledge base to the
+network.
 """
 import os
 from pathlib import Path
@@ -25,8 +37,10 @@ from .config import cfg, config_path, reload as reload_config
 CHAT_ROLE = "chat"
 SECRETS_FILENAME = "secrets.env"
 
-# Written into the config header so the next person to open the file by hand
-# knows why the comments they wrote are gone.
+# Fields that only take effect on the next launch, reported to the UI so it can
+# say so at the point of saving rather than leaving the user to wonder.
+RESTART_FIELDS = ("vault", "api_port", "url_fetcher")
+
 _HEADER = (
     "# Almanac configuration.\n"
     "# Managed by the in-app Settings panel; hand edits are preserved but\n"
@@ -56,19 +70,47 @@ def has_api_key():
     return bool(_load_env(conf.get("key_env_file"), key_name))
 
 
+def _is_removable(path):
+    """Whether a path sits on a mounted volume rather than the system disk.
+
+    Not a hard block: an external drive is a legitimate place for a large
+    vault. It is surfaced because the single-holder lock the embedded store
+    relies on has been seen not to be enforced on some external filesystems.
+    """
+    try:
+        return str(Path(path).resolve()).startswith("/Volumes/")
+    except OSError:
+        return False
+
+
 def read_settings():
     """Current settings for the UI. Never includes the key itself."""
+    from . import desktop
+
     conf = _provider_conf()
     roles = cfg("llm.roles", {}) or {}
     chat_role = roles.get(CHAT_ROLE) if isinstance(roles.get(CHAT_ROLE), dict) else {}
+    vault = str(cfg("kb_root"))
+    pointer = desktop.read_vault_pointer()
     return {
+        # Storage
+        "vault": vault,
+        "vault_is_default": pointer is None,
+        "vault_default": str(desktop.default_vault()),
+        "vault_removable": _is_removable(vault),
+        "config_path": str(config_path()),
+        "secrets_path": str(secrets_path()),
+        "index_path": str(Path(vault) / "state" / "qdrant"),
+        # Ask
         "base_url": conf.get("base_url") or "",
         "model": chat_role.get("model") or cfg("llm.classify_cloud", "") or "",
         "key_env": conf.get("key_env") or "DEEPSEEK_API_KEY",
         "has_api_key": has_api_key(),
         "chat_enabled": bool(chat_role.get("provider") and chat_role.get("model")),
-        "config_path": str(config_path()),
-        "vault": str(cfg("kb_root")),
+        # Search and server
+        "top_k": cfg("recall.top_k", 4),
+        "api_port": cfg("api.port", 8377),
+        "url_fetcher": cfg("capture.url_fetcher", "") or "",
     }
 
 
@@ -100,38 +142,98 @@ def _write_secret(key_name, value):
     return path
 
 
-def _validate(base_url, model, chat_enabled):
-    if chat_enabled and not model:
-        return "A model name is required to turn on Ask."
-    if base_url and not str(base_url).startswith(("http://", "https://")):
-        return "The provider URL must start with http:// or https://."
-    return None
+def _coerce_int(value, label, low, high, current):
+    if value is None or value == "":
+        return current, None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return current, f"{label} must be a whole number."
+    if not low <= number <= high:
+        return current, f"{label} must be between {low} and {high}."
+    return number, None
 
 
-def write_settings(base_url=None, model=None, api_key=None, chat_enabled=None):
-    """Apply settings to kb_config.yaml and the secrets file.
+def _check_vault(candidate):
+    """Validate a proposed vault directory. Returns (resolved_path, error)."""
+    path = Path(os.path.expanduser(str(candidate))).resolve()
+    if not path.is_absolute():
+        return None, "The vault location must be an absolute path."
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return None, f"Cannot use that folder: {exc}"
+    if not os.access(path, os.W_OK):
+        return None, f"That folder is not writable: {path}"
+    return path, None
 
-    Returns (ok, message, settings). Only the fields supplied are touched, so
-    saving the form without retyping the key leaves the stored key alone.
+
+def write_settings(payload):
+    """Apply settings to kb_config.yaml, the secrets file, and the vault pointer.
+
+    Returns (ok, message, settings, restart_needed). Only the fields supplied
+    are touched, so saving the form without retyping the key leaves the stored
+    key alone.
     """
     try:
         import yaml
     except ImportError:
-        return False, "PyYAML is not available, so settings cannot be saved.", read_settings()
+        return False, "PyYAML is not available, so settings cannot be saved.", read_settings(), False
 
+    from . import desktop
+
+    payload = payload or {}
     current = read_settings()
-    base_url = current["base_url"] if base_url is None else str(base_url).strip()
-    model = current["model"] if model is None else str(model).strip()
-    chat_enabled = current["chat_enabled"] if chat_enabled is None else bool(chat_enabled)
 
-    error = _validate(base_url, model, chat_enabled)
+    def given(name):
+        return payload.get(name) if name in payload else None
+
+    base_url = current["base_url"] if given("base_url") is None else str(payload["base_url"]).strip()
+    model = current["model"] if given("model") is None else str(payload["model"]).strip()
+    chat_enabled = (
+        current["chat_enabled"]
+        if given("chat_enabled") is None
+        else bool(payload["chat_enabled"])
+    )
+    url_fetcher = (
+        current["url_fetcher"]
+        if given("url_fetcher") is None
+        else str(payload["url_fetcher"]).strip()
+    )
+
+    top_k, error = _coerce_int(given("top_k"), "Results per search", 1, 50, current["top_k"])
     if error:
-        return False, error, current
+        return False, error, current, False
+    api_port, error = _coerce_int(given("api_port"), "Port", 1024, 65535, current["api_port"])
+    if error:
+        return False, error, current, False
+
+    if chat_enabled and not model:
+        return False, "A model name is required to turn on Ask.", current, False
+    if base_url and not base_url.startswith(("http://", "https://")):
+        return False, "The provider URL must start with http:// or https://.", current, False
+    if url_fetcher and not Path(os.path.expanduser(url_fetcher)).exists():
+        return False, f"No such URL fetcher: {url_fetcher}", current, False
 
     key_name = current["key_env"] or "DEEPSEEK_API_KEY"
-    api_key = (api_key or "").strip()
+    api_key = str(payload.get("api_key") or "").strip()
     if chat_enabled and not api_key and not current["has_api_key"]:
-        return False, f"An API key is required to turn on Ask ({key_name}).", current
+        return False, f"An API key is required to turn on Ask ({key_name}).", current, False
+
+    # The vault is resolved before the config write so a bad path fails before
+    # anything has been changed.
+    new_vault = None
+    vault_given = given("vault")
+    if vault_given is not None:
+        requested = str(payload["vault"]).strip()
+        if not requested:
+            new_vault = ""  # restore the default
+        else:
+            resolved, error = _check_vault(requested)
+            if error:
+                return False, error, current, False
+            if str(resolved) != current["vault"]:
+                new_vault = resolved
 
     path = config_path()
     raw = {}
@@ -139,9 +241,9 @@ def write_settings(base_url=None, model=None, api_key=None, chat_enabled=None):
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception as exc:
-            return False, f"Could not read the existing config: {exc}", current
+            return False, f"Could not read the existing config: {exc}", current, False
     if not isinstance(raw, dict):
-        return False, "The existing config is not a mapping; not overwriting it.", current
+        return False, "The existing config is not a mapping; not overwriting it.", current, False
 
     llm = raw.setdefault("llm", {})
     providers = llm.setdefault("providers", {})
@@ -155,7 +257,7 @@ def write_settings(base_url=None, model=None, api_key=None, chat_enabled=None):
         try:
             cloud["key_env_file"] = str(_write_secret(key_name, api_key))
         except OSError as exc:
-            return False, f"Could not save the API key: {exc}", current
+            return False, f"Could not save the API key: {exc}", current, False
 
     roles = llm.setdefault("roles", {})
     if not isinstance(roles, dict):
@@ -168,6 +270,10 @@ def write_settings(base_url=None, model=None, api_key=None, chat_enabled=None):
     else:
         roles.pop(CHAT_ROLE, None)
 
+    raw.setdefault("recall", {})["top_k"] = top_k
+    raw.setdefault("api", {})["port"] = api_port
+    raw.setdefault("capture", {})["url_fetcher"] = url_fetcher
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -175,7 +281,31 @@ def write_settings(base_url=None, model=None, api_key=None, chat_enabled=None):
             encoding="utf-8",
         )
     except OSError as exc:
-        return False, f"Could not write {path}: {exc}", current
+        return False, f"Could not write {path}: {exc}", current, False
+
+    notes = []
+    if new_vault is not None:
+        try:
+            desktop.write_vault_pointer(new_vault)
+        except OSError as exc:
+            return False, f"Could not save the vault location: {exc}", read_settings(), False
+        if new_vault == "":
+            notes.append(f"Vault reset to the default ({current['vault_default']}).")
+        else:
+            notes.append(
+                f"Vault will be {new_vault} after a restart. Your existing notes stay "
+                f"in {current['vault']} — Almanac does not move them."
+            )
+            if _is_removable(new_vault):
+                notes.append(
+                    "That location is on a removable volume: keep it mounted "
+                    "before launching, and never run two copies against it."
+                )
 
     reload_config()
-    return True, "Settings saved.", read_settings()
+    settings = read_settings()
+    restart_needed = bool(notes) or api_port != current["api_port"] or url_fetcher != current["url_fetcher"]
+    message = " ".join(["Settings saved."] + notes)
+    if restart_needed and not notes:
+        message += " Restart Almanac for the changed settings to take effect."
+    return True, message, settings, restart_needed

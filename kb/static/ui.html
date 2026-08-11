@@ -117,6 +117,32 @@
     .settings-form .button { justify-self: start; padding: 0 22px; }
     .settings-check { display: flex; align-items: center; gap: 10px; color: var(--text); }
     .settings-check input { width: auto; min-height: 0; }
+    .settings-heading {
+      margin: 14px 0 0;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+    }
+    .settings-heading:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .restart-flag {
+      font-style: normal;
+      font-size: 11px;
+      color: var(--warn, #d8a657);
+      margin-left: 8px;
+    }
+    .settings-paths {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4px 14px;
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .settings-paths dt { color: var(--text); }
+    .settings-paths dd { margin: 0; word-break: break-all; font-family: var(--mono, monospace); }
 
     input, select, textarea {
       width: 100%;
@@ -431,11 +457,24 @@
       <div class="panel-heading">
         <div>
           <h1>Settings</h1>
-          <p class="lede">Capture and search need no configuration. Everything here is only for turning on the Ask tab, which sends your question and the retrieved excerpts to the provider you choose.</p>
+          <p class="lede">Capture and search work with none of this configured. Ask is the only feature that leaves your machine: it sends your question and the retrieved excerpts to the provider you name below.</p>
         </div>
       </div>
 
       <form id="settings-form" class="settings-form">
+        <h2 class="settings-heading">Storage</h2>
+        <label>
+          <span class="field-label">Vault folder <em class="restart-flag">restart required</em></span>
+          <input id="settings-vault" type="text" autocomplete="off" spellcheck="false">
+          <span class="field-hint" id="settings-vault-hint"></span>
+        </label>
+        <dl class="settings-paths">
+          <dt>Config</dt><dd id="settings-config-path"></dd>
+          <dt>Search index</dt><dd id="settings-index-path"></dd>
+          <dt>API key file</dt><dd id="settings-secrets-path"></dd>
+        </dl>
+
+        <h2 class="settings-heading">Ask</h2>
         <label>
           <span class="field-label">Provider URL</span>
           <input id="settings-base-url" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off">
@@ -454,11 +493,28 @@
           <input id="settings-chat-enabled" type="checkbox">
           <span>Turn on the Ask tab</span>
         </label>
+
+        <h2 class="settings-heading">Search and capture</h2>
+        <label>
+          <span class="field-label">Results per search</span>
+          <input id="settings-top-k" type="number" min="1" max="50">
+        </label>
+        <label>
+          <span class="field-label">URL capture command <em class="restart-flag">restart required</em></span>
+          <input id="settings-url-fetcher" type="text" placeholder="Leave blank to capture text only" autocomplete="off" spellcheck="false">
+          <span class="field-hint">An executable that takes a URL and prints markdown. Without one, saving a link stores only the text you paste.</span>
+        </label>
+        <label>
+          <span class="field-label">Port <em class="restart-flag">restart required</em></span>
+          <input id="settings-api-port" type="number" min="1024" max="65535">
+          <span class="field-hint">Loopback only. Almanac never listens on the network.</span>
+        </label>
+
         <button id="settings-save" class="button" type="submit">Save settings</button>
       </form>
 
       <div id="settings-status" class="status-line" aria-live="polite"></div>
-      <p class="footer-note">The key is stored in <code id="settings-secrets-path">a 0600 file inside your vault</code>, not in the config file, and is never sent back to this page. Automatic titles and tags use the same provider. Everything else still runs locally.</p>
+      <p class="footer-note">The API key is stored in a <code>0600</code> file inside your vault, not in the config file, and is never sent back to this page. Automatic titles and tags use the same provider. The embedding model, vector size, and chunking are not settings: changing them would invalidate everything already indexed, so they stay in the config file.</p>
     </section>
   </main>
 
@@ -850,6 +906,15 @@
       }
     }
 
+    async function applyConfiguredDefaults() {
+      try {
+        const settings = await fetchJSON("/settings");
+        byId("top-k").value = settings.top_k;
+      } catch (error) {
+        // The form keeps its markup default; not worth a visible error.
+      }
+    }
+
     byId("chat-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const input = byId("chat-question");
@@ -860,15 +925,28 @@
     });
 
     function renderSettings(settings) {
+      byId("settings-vault").value = settings.vault || "";
       byId("settings-base-url").value = settings.base_url || "";
       byId("settings-model").value = settings.model || "";
       byId("settings-chat-enabled").checked = !!settings.chat_enabled;
+      byId("settings-top-k").value = settings.top_k;
+      byId("settings-api-port").value = settings.api_port;
+      byId("settings-url-fetcher").value = settings.url_fetcher || "";
       byId("settings-key-state").textContent = settings.has_api_key
         ? `A key is saved for ${settings.key_env}. Type a new one to replace it.`
         : `No key saved yet (${settings.key_env}).`;
-      if (settings.vault) {
-        byId("settings-secrets-path").textContent = `${settings.vault}/state/secrets.env`;
+      byId("settings-config-path").textContent = settings.config_path || "";
+      byId("settings-index-path").textContent = settings.index_path || "";
+      byId("settings-secrets-path").textContent = settings.secrets_path || "";
+
+      const hints = [];
+      if (settings.vault_is_default) hints.push("Using the default location.");
+      else hints.push(`Default is ${settings.vault_default}. Clear this field to go back to it.`);
+      hints.push("Changing this does not move notes already captured.");
+      if (settings.vault_removable) {
+        hints.push("This is a removable volume — keep it mounted before launching.");
       }
+      byId("settings-vault-hint").textContent = hints.join(" ");
     }
 
     async function loadSettings() {
@@ -887,17 +965,23 @@
         const data = await fetchJSON("/settings", {
           method: "POST",
           body: JSON.stringify({
+            vault: byId("settings-vault").value.trim(),
             base_url: byId("settings-base-url").value.trim(),
             model: byId("settings-model").value.trim(),
             api_key: byId("settings-api-key").value,
             chat_enabled: byId("settings-chat-enabled").checked,
+            top_k: byId("settings-top-k").value,
+            api_port: byId("settings-api-port").value,
+            url_fetcher: byId("settings-url-fetcher").value.trim(),
           }),
         });
         byId("settings-api-key").value = "";
         renderSettings(data.settings);
         // Applied without a restart, so the Ask tab has to follow immediately.
         setChatConfigured(!!data.settings.chat_enabled);
-        setStatus(status, data.message || "Settings saved.", "success");
+        // The search panel's default comes from the same setting.
+        byId("top-k").value = data.settings.top_k;
+        setStatus(status, data.message || "Settings saved.", data.restart_needed ? "" : "success");
       } catch (error) {
         setStatus(status, error.message, "error");
         loadSettings();
@@ -913,6 +997,7 @@
 
     loadTaxonomy();
     loadCapabilities();
+    applyConfiguredDefaults();
   </script>
 </body>
 </html>

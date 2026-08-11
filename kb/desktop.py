@@ -38,6 +38,46 @@ def default_vault():
     return Path(base) / APP_NAME
 
 
+def pointer_path():
+    """Fixed location of the file naming which vault to open.
+
+    The vault location cannot live in kb_config.yaml, because that file lives
+    *inside* the vault — finding it already requires knowing the answer. This
+    one file stays at the per-platform default no matter where the data goes.
+    """
+    return default_vault() / "vault_location.txt"
+
+
+def read_vault_pointer():
+    """The configured vault, or None when the default is in use."""
+    try:
+        raw = pointer_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    return Path(os.path.expanduser(raw))
+
+
+def write_vault_pointer(path):
+    """Point future launches at ``path``; an empty value restores the default."""
+    pointer = pointer_path()
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    if not path:
+        pointer.unlink(missing_ok=True)
+        return None
+    resolved = Path(os.path.expanduser(str(path)))
+    pointer.write_text(str(resolved) + "\n", encoding="utf-8")
+    return resolved
+
+
+def resolve_vault(explicit=None):
+    """Where this launch reads and writes: --vault, then the pointer, then default."""
+    if explicit:
+        return Path(os.path.expanduser(explicit))
+    return read_vault_pointer() or default_vault()
+
+
 def ensure_config(vault):
     """Write a desktop config on first launch; leave an existing one alone.
 
@@ -156,7 +196,7 @@ def main(argv=None):
     parser.add_argument("--no-schedule", action="store_true", help="do not run background jobs")
     args = parser.parse_args(argv)
 
-    vault = Path(os.path.expanduser(args.vault)) if args.vault else default_vault()
+    vault = resolve_vault(args.vault)
 
     # The log is opened before anything that can fail, so that a launch which
     # dies during configuration still leaves a trace to read afterwards.
