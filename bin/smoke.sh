@@ -111,7 +111,7 @@ check_body() {
   esac
 }
 
-check_body /ui "kb-core" "GET /ui serves the UI"
+check_body /ui "Almanac" "GET /ui serves the UI"
 check_body /taxonomy "categories" "GET /taxonomy responds"
 check_body /proposals "proposals" "GET /proposals responds"
 
