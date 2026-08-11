@@ -17,6 +17,13 @@ downloads a ~2.3GB embedding model; progress goes to
 build is signed and notarized as of v0.2.2, so opening it is the normal
 double-click-then-confirm flow — no extra steps.
 
+Capture and search need no configuration at all. To turn on the optional Ask
+tab, use the **Settings** tab in the app: fill in a provider URL, a model, and
+an API key, and tick "Turn on the Ask tab". The key is written to a `0600` file
+in your vault (`state/secrets.env`) rather than into the config file, and takes
+effect without a restart. Editing `kb_config.yaml` by hand still works and is
+what the rest of this page describes.
+
 ## 1. Prepare config
 
 ```bash
@@ -59,9 +66,10 @@ llm:
       model: deepseek-v4-flash
 ```
 
-An **Ask** tab then appears in the UI. Every answer is generated only from the
-excerpts retrieved for that question, and each one is shown beneath the reply
-with its citation number. An answer that cites nothing is flagged as
+The **Ask** tab then becomes usable; until a chat role is configured it shows
+setup instructions instead of a question box. Every answer is generated only
+from the excerpts retrieved for that question, and each one is shown beneath
+the reply with its citation number. An answer that cites nothing is flagged as
 unsupported rather than presented as fact.
 
 If a coding agent is already querying this knowledge base, leave this off — the

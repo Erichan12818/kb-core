@@ -181,6 +181,22 @@ def _normalize_llm(data):
     llm["deepseek_env_file"] = providers["cloud"].get("key_env_file", key_env_file)
 
 
+def config_path():
+    """Where the active configuration is read from and written back to."""
+    return _config_path()
+
+
+def reload():
+    """Drop the cache so the next cfg() call re-reads the file.
+
+    Settings written through the UI take effect without a restart only because
+    every consumer calls cfg() at use time rather than caching at import.
+    """
+    global _CACHE
+    _CACHE = None
+    return _load()
+
+
 def cfg(path, default=None):
     cur = _load()
     for part in path.split("."):

@@ -232,6 +232,10 @@ class Handler(BaseHTTPRequestHandler):
             from . import chat as kb_chat
 
             self._send_json(200, {"chat": kb_chat.is_enabled()})
+        elif path == "/settings":
+            from . import settings as kb_settings
+
+            self._send_json(200, kb_settings.read_settings())
         elif path == "/proposals":
             from . import proposals
 
@@ -266,8 +270,25 @@ class Handler(BaseHTTPRequestHandler):
             self._post_proposals(body)
         elif path == "/chat":
             self._post_chat(body)
+        elif path == "/settings":
+            self._post_settings(body)
         else:
             self._send_json(404, {"error": "not_found"})
+
+    def _post_settings(self, body):
+        """Apply settings from the UI form. The key is write-only over HTTP."""
+        from . import settings as kb_settings
+
+        ok, message, current = kb_settings.write_settings(
+            base_url=body.get("base_url"),
+            model=body.get("model"),
+            api_key=body.get("api_key"),
+            chat_enabled=body.get("chat_enabled"),
+        )
+        self._send_json(
+            200 if ok else 400,
+            {"ok": ok, "message": message, "settings": current},
+        )
 
     def _post_chat(self, body):
         """Answer from retrieved excerpts only. Disabled unless a chat role is configured."""

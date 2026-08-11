@@ -111,6 +111,12 @@
 
     label { color: var(--muted); font-size: 13px; }
     .field-label { display: block; margin: 0 0 7px; }
+    .field-hint { display: block; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+    .settings-form { display: grid; gap: 18px; max-width: 560px; }
+    .settings-form .button { justify-self: start; padding: 0 22px; }
+    .settings-check { display: flex; align-items: center; gap: 10px; color: var(--text); }
+    .settings-check input { width: auto; min-height: 0; }
 
     input, select, textarea {
       width: 100%;
@@ -344,6 +350,7 @@
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
         <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel" data-tab="settings">Settings</button>
       </nav>
     </div>
   </header>
@@ -418,6 +425,40 @@
       <div id="health-status" class="status-line" aria-live="polite"></div>
       <div id="health-checks" class="health-grid"></div>
       <div id="directory-stats"></div>
+    </section>
+
+    <section id="settings-panel" role="tabpanel" data-panel="settings" hidden>
+      <div class="panel-heading">
+        <div>
+          <h1>Settings</h1>
+          <p class="lede">Capture and search need no configuration. Everything here is only for turning on the Ask tab, which sends your question and the retrieved excerpts to the provider you choose.</p>
+        </div>
+      </div>
+
+      <form id="settings-form" class="settings-form">
+        <label>
+          <span class="field-label">Provider URL</span>
+          <input id="settings-base-url" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off">
+          <span class="field-hint">Any OpenAI-compatible endpoint.</span>
+        </label>
+        <label>
+          <span class="field-label">Model</span>
+          <input id="settings-model" type="text" placeholder="deepseek-v4-flash" autocomplete="off">
+        </label>
+        <label>
+          <span class="field-label">API key</span>
+          <input id="settings-api-key" type="password" placeholder="Leave blank to keep the saved key" autocomplete="off">
+          <span class="field-hint" id="settings-key-state"></span>
+        </label>
+        <label class="settings-check">
+          <input id="settings-chat-enabled" type="checkbox">
+          <span>Turn on the Ask tab</span>
+        </label>
+        <button id="settings-save" class="button" type="submit">Save settings</button>
+      </form>
+
+      <div id="settings-status" class="status-line" aria-live="polite"></div>
+      <p class="footer-note">The key is stored in <code id="settings-secrets-path">a 0600 file inside your vault</code>, not in the config file, and is never sent back to this page. Automatic titles and tags use the same provider. Everything else still runs locally.</p>
     </section>
   </main>
 
@@ -686,6 +727,7 @@
       }
       if (name === "proposals") loadProposals();
       if (name === "health") loadHealth();
+      if (name === "settings") loadSettings();
     }
 
     byId("search-form").addEventListener("submit", (event) => {
@@ -815,6 +857,58 @@
       if (!question) return;
       input.value = "";
       ask(question);
+    });
+
+    function renderSettings(settings) {
+      byId("settings-base-url").value = settings.base_url || "";
+      byId("settings-model").value = settings.model || "";
+      byId("settings-chat-enabled").checked = !!settings.chat_enabled;
+      byId("settings-key-state").textContent = settings.has_api_key
+        ? `A key is saved for ${settings.key_env}. Type a new one to replace it.`
+        : `No key saved yet (${settings.key_env}).`;
+      if (settings.vault) {
+        byId("settings-secrets-path").textContent = `${settings.vault}/state/secrets.env`;
+      }
+    }
+
+    async function loadSettings() {
+      try {
+        renderSettings(await fetchJSON("/settings"));
+      } catch (error) {
+        setStatus(byId("settings-status"), "Could not load settings: " + error.message, "error");
+      }
+    }
+
+    async function saveSettings() {
+      const status = byId("settings-status");
+      setStatus(status, "Saving…");
+      byId("settings-save").disabled = true;
+      try {
+        const data = await fetchJSON("/settings", {
+          method: "POST",
+          body: JSON.stringify({
+            base_url: byId("settings-base-url").value.trim(),
+            model: byId("settings-model").value.trim(),
+            api_key: byId("settings-api-key").value,
+            chat_enabled: byId("settings-chat-enabled").checked,
+          }),
+        });
+        byId("settings-api-key").value = "";
+        renderSettings(data.settings);
+        // Applied without a restart, so the Ask tab has to follow immediately.
+        setChatConfigured(!!data.settings.chat_enabled);
+        setStatus(status, data.message || "Settings saved.", "success");
+      } catch (error) {
+        setStatus(status, error.message, "error");
+        loadSettings();
+      } finally {
+        byId("settings-save").disabled = false;
+      }
+    }
+
+    byId("settings-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveSettings();
     });
 
     loadTaxonomy();
