@@ -86,7 +86,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Almanac",
             "CFBundleDisplayName": "Almanac",
-            "CFBundleShortVersionString": "0.2.4",
+            "CFBundleShortVersionString": "0.2.5",
             "NSHighResolutionCapable": True,
             # console=True makes PyInstaller default LSBackgroundOnly to true,
             # which is what turned a failed first launch into a silent hang:
