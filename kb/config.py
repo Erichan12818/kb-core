@@ -9,6 +9,9 @@ from pathlib import Path
 
 DEFAULTS = {
     "kb_root": "./vault",
+    # Extra folders to read documents from, alongside the vault's raw_files.
+    # Read-only, and allowed to be offline (an external drive is the point).
+    "sources": [],
     "qdrant": {
         # server = talk to a Qdrant service; embedded = run in-process against
         # a local directory (no server, no Docker, single process only).
@@ -24,6 +27,11 @@ DEFAULTS = {
         "dense_model": "intfloat/multilingual-e5-large",
         "sparse_model": "Qdrant/bm25",
         "dense_dim": 1024,
+    },
+    "ingest": {
+        # Skip anything bigger than this, so pointing at a drive full of media
+        # cannot stall a run on a single huge file.
+        "max_file_mb": 25,
     },
     "chunking": {
         "size": 500,

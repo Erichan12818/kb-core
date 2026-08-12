@@ -83,6 +83,30 @@ def _is_removable(path):
         return False
 
 
+def _read_sources():
+    """Folders the user pointed at, with whether each is reachable right now.
+
+    Reporting availability matters: an unplugged drive is a normal state, not
+    an error, and the UI has to be able to say so rather than look broken.
+    """
+    out = []
+    for entry in cfg("sources", []) or []:
+        raw = entry.get("path") if isinstance(entry, dict) else entry
+        if not raw:
+            continue
+        path = Path(os.path.expanduser(str(raw)))
+        try:
+            available = path.is_dir()
+        except OSError:
+            available = False
+        out.append({
+            "path": str(path),
+            "available": available,
+            "removable": _is_removable(path),
+        })
+    return out
+
+
 def read_settings():
     """Current settings for the UI. Never includes the key itself."""
     from . import desktop
@@ -101,6 +125,7 @@ def read_settings():
         "config_path": str(config_path()),
         "secrets_path": str(secrets_path()),
         "index_path": str(Path(vault) / "state" / "qdrant"),
+        "sources": _read_sources(),
         # Ask
         "base_url": conf.get("base_url") or "",
         "model": chat_role.get("model") or cfg("llm.classify_cloud", "") or "",
@@ -168,6 +193,41 @@ def _check_vault(candidate):
     return path, None
 
 
+def _clean_sources(value):
+    """Normalise the newline-separated folder list from the form.
+
+    A path that is not reachable right now is accepted rather than rejected:
+    the whole point of the feature is external drives, and one is expected to
+    be absent most of the time. Only a path that exists and is a *file* is
+    refused, since that is a typo rather than an unplugged disk.
+    """
+    if isinstance(value, str):
+        entries = [line.strip() for line in value.splitlines()]
+    elif isinstance(value, list):
+        entries = [str(v).strip() for v in value]
+    else:
+        return None, "Sources must be a list of folders."
+
+    out, seen = [], set()
+    for entry in entries:
+        if not entry:
+            continue
+        path = Path(os.path.expanduser(entry))
+        if not path.is_absolute():
+            return None, f"Source folders must be absolute paths: {entry}"
+        try:
+            if path.exists() and not path.is_dir():
+                return None, f"Not a folder: {entry}"
+        except OSError:
+            pass  # unreachable volume — allowed, see docstring
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out, None
+
+
 def write_settings(payload):
     """Apply settings to kb_config.yaml, the secrets file, and the vault pointer.
 
@@ -200,6 +260,12 @@ def write_settings(payload):
         if given("url_fetcher") is None
         else str(payload["url_fetcher"]).strip()
     )
+
+    sources = [s["path"] for s in current["sources"]]
+    if given("sources") is not None:
+        sources, error = _clean_sources(payload["sources"])
+        if error:
+            return False, error, current, False
 
     top_k, error = _coerce_int(given("top_k"), "Results per search", 1, 50, current["top_k"])
     if error:
@@ -270,6 +336,7 @@ def write_settings(payload):
     else:
         roles.pop(CHAT_ROLE, None)
 
+    raw["sources"] = sources
     raw.setdefault("recall", {})["top_k"] = top_k
     raw.setdefault("api", {})["port"] = api_port
     raw.setdefault("capture", {})["url_fetcher"] = url_fetcher

@@ -155,7 +155,8 @@
       padding: 0 14px;
     }
 
-    input::placeholder { color: #788591; }
+    textarea { padding: 12px 14px; resize: vertical; font-family: var(--mono); font-size: 13px; }
+    input::placeholder, textarea::placeholder { color: #788591; }
     input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
 
     .button {
@@ -473,6 +474,13 @@
           <dt>Search index</dt><dd id="settings-index-path"></dd>
           <dt>API key file</dt><dd id="settings-secrets-path"></dd>
         </dl>
+
+        <label>
+          <span class="field-label">Extra folders to read <em class="restart-flag">applies on next ingest</em></span>
+          <textarea id="settings-sources" rows="3" spellcheck="false" placeholder="/Volumes/MyDrive/Documents&#10;/Users/you/Notes"></textarea>
+          <span class="field-hint">One folder per line. Read strictly read-only — files are never moved or modified. A folder that is not mounted right now is fine to list: it is skipped, and anything already indexed from it is kept, not deleted.</span>
+        </label>
+        <div id="settings-sources-state" class="settings-paths"></div>
 
         <h2 class="settings-heading">Ask</h2>
         <label>
@@ -939,6 +947,19 @@
       byId("settings-index-path").textContent = settings.index_path || "";
       byId("settings-secrets-path").textContent = settings.secrets_path || "";
 
+      const sources = settings.sources || [];
+      byId("settings-sources").value = sources.map((s) => s.path).join("\n");
+      const state = byId("settings-sources-state");
+      state.textContent = "";
+      for (const source of sources) {
+        const dt = document.createElement("dt");
+        dt.textContent = source.available ? "Ready" : "Not mounted";
+        if (!source.available) dt.style.color = "var(--warn)";
+        const dd = document.createElement("dd");
+        dd.textContent = source.path;
+        state.append(dt, dd);
+      }
+
       const hints = [];
       if (settings.vault_is_default) hints.push("Using the default location.");
       else hints.push(`Default is ${settings.vault_default}. Clear this field to go back to it.`);
@@ -966,6 +987,7 @@
           method: "POST",
           body: JSON.stringify({
             vault: byId("settings-vault").value.trim(),
+            sources: byId("settings-sources").value,
             base_url: byId("settings-base-url").value.trim(),
             model: byId("settings-model").value.trim(),
             api_key: byId("settings-api-key").value,
