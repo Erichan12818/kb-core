@@ -27,6 +27,16 @@ DEFAULTS = {
         "dense_model": "intfloat/multilingual-e5-large",
         "sparse_model": "Qdrant/bm25",
         "dense_dim": 1024,
+        # Blank uses the per-platform cache directory; see kb/embedding.py for
+        # why this must not be left to fastembed's temp-dir default.
+        "cache_dir": "",
+    },
+    "capture": {
+        # External extractor turning a URL into markdown; blank = text only.
+        "url_fetcher": "",
+        # Where notes written through kb_add are saved. Blank = <vault>/raw_files.
+        # Whatever this points at is always read back, so notes stay indexed.
+        "notes_dir": "",
     },
     "ingest": {
         # Skip anything bigger than this, so pointing at a drive full of media

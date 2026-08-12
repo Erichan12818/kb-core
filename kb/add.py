@@ -18,6 +18,53 @@ from .config import cfg
 
 KB_ROOT  = cfg("kb_root")
 RAW_ROOT = os.path.join(KB_ROOT, "raw_files")
+
+
+def notes_root():
+    """Where documents written through this tool are saved.
+
+    Defaults to the vault's raw_files. ``capture.notes_dir`` moves it somewhere
+    the user chose — a synced folder, a project directory, a shared drive — so
+    agent-written notes can live where the rest of their work lives.
+
+    Read at call time so a change in Settings applies without a restart, and
+    resolved through the same helper everywhere so the write path and the read
+    path cannot disagree about where notes are.
+    """
+    configured = str(cfg("capture.notes_dir", "") or "").strip()
+    if configured:
+        return Path(os.path.expanduser(configured))
+    return Path(cfg("kb_root")) / "raw_files"
+
+
+def safe_category(category):
+    """A single folder name, never a path.
+
+    ``category`` reaches this from an MCP tool call, so it is untrusted input:
+    without stripping separators and dot segments, a category of ``../..`` would
+    write outside the notes directory entirely.
+    """
+    name = str(category or "inbox").strip().replace("\\", "/")
+    name = name.split("/")[-1] if "/" in name else name
+    name = re.sub(r"[^\w一-鿿.\- ]", "", name).strip(". ")
+    return name or "inbox"
+
+
+def unique_path(directory, filename):
+    """Never overwrite an existing note; add a counter instead.
+
+    Two notes captured the same day with the same title are ordinary — losing
+    the first one silently is not.
+    """
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem, suffix = candidate.stem, candidate.suffix
+    for n in range(2, 1000):
+        candidate = directory / f"{stem}-{n}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"太多同名檔案：{filename}")
 # Fetching a URL as clean markdown needs an external extractor; which one is a
 # deployment choice, so it is configured rather than assumed. Text capture works
 # without it.
@@ -110,8 +157,15 @@ def _run_ingest(rel_file, background):
 
 
 def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=False):
-    """把 URL/文字存入 raw_files，回入庫結果；外部依賴錯誤交由 caller 決定處理。"""
-    Path(RAW_ROOT).mkdir(parents=True, exist_ok=True)
+    """把 URL/文字存入筆記目錄，回入庫結果；外部依賴錯誤交由 caller 決定處理。"""
+    root = notes_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(
+            f"筆記目錄寫唔到：{root}（{type(e).__name__}: {e}）"
+            "\n如果嗰個位置係外置碟或者網絡碟，請先掛載，或者喺設定改返。"
+        ) from e
 
     today = datetime.date.today().isoformat()
     content = content or ""
@@ -125,12 +179,12 @@ def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=F
         final_title = title or derive_title(content)
         body = f"<!-- 來源(文字) ｜ 加入: {today} by kb_add.py -->\n\n" + content
 
-    out_dir = Path(RAW_ROOT) / category
+    category = safe_category(category)
+    out_dir = root / category
     out_dir.mkdir(parents=True, exist_ok=True)
-    fn = f"{today}-{slugify(final_title)}.md"
-    out_path = out_dir / fn
+    out_path = unique_path(out_dir, f"{today}-{slugify(final_title)}.md")
     out_path.write_text(body, encoding="utf-8")
-    rel_file = f"{category}/{fn}"
+    rel_file = f"{category}/{out_path.name}"
 
     if ingest:
         _run_ingest(rel_file, background=async_ingest)

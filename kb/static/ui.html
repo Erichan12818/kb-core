@@ -141,6 +141,21 @@
       font-size: 12px;
       color: var(--muted);
     }
+    .settings-scan { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .settings-scan .status-line { margin: 0; }
+    .scan-output {
+      margin: 0;
+      padding: 12px 14px;
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--muted);
+      font: 12px/1.5 var(--mono);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .settings-paths dt { color: var(--text); }
     .settings-paths dd { margin: 0; word-break: break-all; font-family: var(--mono, monospace); }
 
@@ -473,14 +488,20 @@
           <dt>Config</dt><dd id="settings-config-path"></dd>
           <dt>Search index</dt><dd id="settings-index-path"></dd>
           <dt>API key file</dt><dd id="settings-secrets-path"></dd>
+          <dt>Model cache</dt><dd id="settings-model-cache-path"></dd>
         </dl>
 
         <label>
-          <span class="field-label">Extra folders to read <em class="restart-flag">applies on next ingest</em></span>
+          <span class="field-label">Extra folders to read</span>
           <textarea id="settings-sources" rows="3" spellcheck="false" placeholder="/Volumes/MyDrive/Documents&#10;/Users/you/Notes"></textarea>
-          <span class="field-hint">One folder per line. Read strictly read-only — files are never moved or modified. A folder that is not mounted right now is fine to list: it is skipped, and anything already indexed from it is kept, not deleted.</span>
+          <span class="field-hint">One folder per line. Read strictly read-only — files are never moved or modified. A folder that is not mounted right now is fine to list: it is skipped, and anything already indexed from it is kept, not deleted. Reads .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml.</span>
         </label>
         <div id="settings-sources-state" class="settings-paths"></div>
+        <div class="settings-scan">
+          <button id="scan-now" class="button secondary" type="button">Scan for new documents</button>
+          <span id="scan-status" class="status-line" aria-live="polite">Save first, then scan. Scanning also happens automatically each night.</span>
+        </div>
+        <pre id="scan-output" class="scan-output" hidden></pre>
 
         <h2 class="settings-heading">Ask</h2>
         <label>
@@ -506,6 +527,11 @@
         <label>
           <span class="field-label">Results per search</span>
           <input id="settings-top-k" type="number" min="1" max="50">
+        </label>
+        <label>
+          <span class="field-label">Save new notes to</span>
+          <input id="settings-notes-dir" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep them in the vault">
+          <span class="field-hint" id="settings-notes-dir-hint"></span>
         </label>
         <label>
           <span class="field-label">URL capture command <em class="restart-flag">restart required</em></span>
@@ -940,12 +966,16 @@
       byId("settings-top-k").value = settings.top_k;
       byId("settings-api-port").value = settings.api_port;
       byId("settings-url-fetcher").value = settings.url_fetcher || "";
+      byId("settings-notes-dir").value = settings.notes_dir || "";
+      byId("settings-notes-dir-hint").textContent =
+        `Notes you or an agent capture are written here, and always read back into the index — ${settings.notes_dir_effective || ""}`;
       byId("settings-key-state").textContent = settings.has_api_key
         ? `A key is saved for ${settings.key_env}. Type a new one to replace it.`
         : `No key saved yet (${settings.key_env}).`;
       byId("settings-config-path").textContent = settings.config_path || "";
       byId("settings-index-path").textContent = settings.index_path || "";
       byId("settings-secrets-path").textContent = settings.secrets_path || "";
+      byId("settings-model-cache-path").textContent = settings.model_cache_path || "";
 
       const sources = settings.sources || [];
       byId("settings-sources").value = sources.map((s) => s.path).join("\n");
@@ -976,6 +1006,16 @@
       } catch (error) {
         setStatus(byId("settings-status"), "Could not load settings: " + error.message, "error");
       }
+      try {
+        // A scan started before this tab was opened should still be visible.
+        const status = await fetchJSON("/scan");
+        if (status.state !== "idle") {
+          renderScan(status);
+          if (status.running) setTimeout(pollScan, 1500);
+        }
+      } catch (error) {
+        // Nothing to show; the button still works.
+      }
     }
 
     async function saveSettings() {
@@ -995,6 +1035,7 @@
             top_k: byId("settings-top-k").value,
             api_port: byId("settings-api-port").value,
             url_fetcher: byId("settings-url-fetcher").value.trim(),
+            notes_dir: byId("settings-notes-dir").value.trim(),
           }),
         });
         byId("settings-api-key").value = "";
@@ -1015,6 +1056,48 @@
     byId("settings-form").addEventListener("submit", (event) => {
       event.preventDefault();
       saveSettings();
+    });
+
+    function renderScan(status) {
+      const line = byId("scan-status");
+      const output = byId("scan-output");
+      const kind = status.state === "failed" ? "error"
+        : status.state === "completed" ? "success" : "";
+      setStatus(line, status.message || status.state, kind);
+      byId("scan-now").disabled = !!status.running;
+      if (status.output && status.output.length) {
+        output.hidden = false;
+        output.textContent = status.output.join("\n");
+      }
+      return status;
+    }
+
+    async function pollScan() {
+      try {
+        const status = renderScan(await fetchJSON("/scan"));
+        if (status.running) {
+          setTimeout(pollScan, 1500);
+        } else if (status.ok) {
+          // The catalog and category list change as a result of a scan.
+          loadTaxonomy();
+        }
+      } catch (error) {
+        setStatus(byId("scan-status"), "Lost track of the scan: " + error.message, "error");
+        byId("scan-now").disabled = false;
+      }
+    }
+
+    byId("scan-now").addEventListener("click", async () => {
+      byId("scan-now").disabled = true;
+      byId("scan-output").hidden = true;
+      setStatus(byId("scan-status"), "Starting…");
+      try {
+        renderScan(await fetchJSON("/scan", { method: "POST", body: "{}" }));
+        setTimeout(pollScan, 1000);
+      } catch (error) {
+        setStatus(byId("scan-status"), error.message, "error");
+        byId("scan-now").disabled = false;
+      }
     });
 
     loadTaxonomy();

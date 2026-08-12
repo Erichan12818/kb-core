@@ -16,7 +16,10 @@ REPO = Path(SPECPATH).parent
 # fastembed and qdrant_client both ship data and lazily import submodules that
 # static analysis misses, so they are collected wholesale.
 datas, binaries, hiddenimports = [], [], []
-for package in ("fastembed", "qdrant_client", "tokenizers", "onnxruntime"):
+for package in ("fastembed", "qdrant_client", "tokenizers", "onnxruntime",
+                # python-docx and python-pptx read XML templates from package
+                # data at runtime; collecting the module alone is not enough.
+                "docx", "pptx"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -29,9 +32,12 @@ datas += collect_data_files("kb")
 
 hiddenimports += [
     "kb.api", "kb.add", "kb.apply", "kb.audit", "kb.catalog", "kb.chat",
-    "kb.config", "kb.eval", "kb.health", "kb.image", "kb.index",
+    "kb.config", "kb.embedding", "kb.eval", "kb.health", "kb.image", "kb.index",
     "kb.index_update", "kb.ingest", "kb.llm", "kb.mcp", "kb.notify",
     "kb.proposals", "kb.recall", "kb.session_context", "kb.store", "kb.worker",
+    # Office parsers are imported inside load_text(), so static analysis does
+    # not see them and the frozen build would ship without them.
+    "docx", "openpyxl", "pptx",
 ]
 
 a = Analysis(

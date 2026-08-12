@@ -46,14 +46,14 @@ def load_yaml(path):
 
 def init_retriever():
     try:
-        from fastembed import SparseTextEmbedding, TextEmbedding
         from qdrant_client import QdrantClient, models
+
+        from . import embedding
 
         client = store.connect(QDRANT_TIMEOUT)
         if not client.collection_exists(COLLECTION):
             raise RuntimeError(f"collection not found: {COLLECTION}")
-        dense = TextEmbedding(DENSE_MODEL)
-        sparse = SparseTextEmbedding(SPARSE_MODEL)
+        dense, sparse = embedding.pair(DENSE_MODEL, SPARSE_MODEL)
         return client, models, dense, sparse
     except Exception as e:
         print(f"⚠️ KB 評估略過：Qdrant 檢索不可用（{type(e).__name__}）：{e}")

@@ -83,6 +83,16 @@ def _is_removable(path):
         return False
 
 
+def _model_cache_path():
+    """Where the ~2.3GB embedding models are kept. Reported, not editable here."""
+    from . import embedding
+
+    try:
+        return str(embedding.cache_dir())
+    except OSError as exc:
+        return f"(unavailable: {exc})"
+
+
 def _read_sources():
     """Folders the user pointed at, with whether each is reachable right now.
 
@@ -125,6 +135,7 @@ def read_settings():
         "config_path": str(config_path()),
         "secrets_path": str(secrets_path()),
         "index_path": str(Path(vault) / "state" / "qdrant"),
+        "model_cache_path": _model_cache_path(),
         "sources": _read_sources(),
         # Ask
         "base_url": conf.get("base_url") or "",
@@ -136,7 +147,19 @@ def read_settings():
         "top_k": cfg("recall.top_k", 4),
         "api_port": cfg("api.port", 8377),
         "url_fetcher": cfg("capture.url_fetcher", "") or "",
+        "notes_dir": cfg("capture.notes_dir", "") or "",
+        "notes_dir_effective": _notes_dir_effective(),
     }
+
+
+def _notes_dir_effective():
+    """Where notes actually land, whether or not a custom folder is set."""
+    from .add import notes_root
+
+    try:
+        return str(notes_root())
+    except Exception as exc:  # config in a bad state should not break the page
+        return f"(unavailable: {exc})"
 
 
 def _write_secret(key_name, value):
@@ -281,6 +304,15 @@ def write_settings(payload):
     if url_fetcher and not Path(os.path.expanduser(url_fetcher)).exists():
         return False, f"No such URL fetcher: {url_fetcher}", current, False
 
+    notes_dir = current["notes_dir"] if given("notes_dir") is None else str(payload["notes_dir"]).strip()
+    if notes_dir:
+        # Unlike a read source, this one is written to — so it has to be
+        # reachable and writable now, not merely plausible.
+        resolved, error = _check_vault(notes_dir)
+        if error:
+            return False, f"Notes folder: {error}", current, False
+        notes_dir = str(resolved)
+
     key_name = current["key_env"] or "DEEPSEEK_API_KEY"
     api_key = str(payload.get("api_key") or "").strip()
     if chat_enabled and not api_key and not current["has_api_key"]:
@@ -339,7 +371,9 @@ def write_settings(payload):
     raw["sources"] = sources
     raw.setdefault("recall", {})["top_k"] = top_k
     raw.setdefault("api", {})["port"] = api_port
-    raw.setdefault("capture", {})["url_fetcher"] = url_fetcher
+    capture = raw.setdefault("capture", {})
+    capture["url_fetcher"] = url_fetcher
+    capture["notes_dir"] = notes_dir
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

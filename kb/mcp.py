@@ -63,15 +63,15 @@ def _components() -> dict[str, Any]:
         return _RECALL
     with _LOCK:
         if not _RECALL:
-            from fastembed import SparseTextEmbedding, TextEmbedding
             from qdrant_client import QdrantClient, models
+            from . import embedding
             from . import recall
 
             _RECALL.update(
                 client=store.connect(recall.QDRANT_TIMEOUT),
                 models=models,
-                dense=TextEmbedding(recall.DENSE_MODEL),
-                sparse=SparseTextEmbedding(recall.SPARSE_MODEL),
+                dense=embedding.dense(recall.DENSE_MODEL),
+                sparse=embedding.sparse(recall.SPARSE_MODEL),
                 recall=recall,
             )
     return _RECALL

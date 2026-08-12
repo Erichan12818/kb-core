@@ -373,10 +373,9 @@ def main():
 
     try:
         from qdrant_client import QdrantClient, models
-        from fastembed import TextEmbedding, SparseTextEmbedding
+        from . import embedding
         client = store.connect(QDRANT_TIMEOUT)
-        dense = TextEmbedding(DENSE_MODEL)
-        sparse = SparseTextEmbedding(SPARSE_MODEL)
+        dense, sparse = embedding.pair(DENSE_MODEL, SPARSE_MODEL)
         outcome = retrieve_two_stage(
             client,
             models,

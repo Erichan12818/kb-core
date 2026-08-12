@@ -6,3 +6,6 @@ pyyaml
 requests
 pillow
 pypdf
+python-docx
+openpyxl
+python-pptx

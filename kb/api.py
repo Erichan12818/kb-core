@@ -16,6 +16,18 @@ UI_PATH = Path(__file__).with_name("static") / "ui.html"
 _RECALL = {}
 _RECALL_LOCK = threading.Lock()
 _PROPOSAL_LOCK = threading.Lock()
+_SCAN_LOCK = threading.Lock()
+# One scan at a time: the embedded store admits a single writer, and two
+# concurrent runs would fight over the same manifest.
+_SCAN_JOB = {
+    "running": False,
+    "state": "idle",
+    "ok": None,
+    "message": "",
+    "output": [],
+    "started_at": None,
+    "finished_at": None,
+}
 _PROPOSAL_JOB = {
     "running": False,
     "state": "idle",
@@ -75,6 +87,102 @@ def _proposal_status():
         return dict(_PROPOSAL_JOB)
 
 
+def _scan_status():
+    with _SCAN_LOCK:
+        return dict(_SCAN_JOB)
+
+
+class _Tee:
+    """Write through to the original stream while recording a copy.
+
+    ingest reports through print(), and a Finder launch has nowhere for that to
+    go — so the scan records it for the UI. It must *tee* rather than redirect:
+    sys.stdout is process-wide, so swapping it out would swallow every other
+    thread's output for the duration of the scan, including the HTTP log.
+    """
+
+    def __init__(self, original, buffer, owner):
+        self._original = original
+        self._buffer = buffer
+        # Only the scan's own thread contributes to the recorded output;
+        # everything else (request logs, the schedule thread) passes straight
+        # through. Without this the UI would show unrelated lines.
+        self._owner = owner
+
+    def write(self, text):
+        if threading.get_ident() == self._owner:
+            self._buffer.write(text)
+        if self._original is not None:
+            try:
+                self._original.write(text)
+            except Exception:
+                pass  # a frozen GUI build can have a closed stdout
+        return len(text)
+
+    def flush(self):
+        if self._original is not None:
+            try:
+                self._original.flush()
+            except Exception:
+                pass
+
+    def isatty(self):
+        return bool(self._original is not None and getattr(self._original, "isatty", bool)())
+
+
+def _run_scan():
+    """Run ingest in-process, keeping a copy of its console output for the UI."""
+    import io
+    import sys as _sys
+
+    buffer = io.StringIO()
+    owner = threading.get_ident()
+    saved_out, saved_err = _sys.stdout, _sys.stderr
+    _sys.stdout = _Tee(saved_out, buffer, owner)
+    _sys.stderr = _Tee(saved_err, buffer, owner)
+    try:
+        from . import ingest as kb_ingest
+
+        kb_ingest.main()
+        ok, message = True, "Scan finished."
+    except SystemExit as exc:
+        # ingest calls sys.exit() when no source is readable.
+        ok, message = False, str(exc) or "Scan stopped."
+    except Exception as exc:
+        ok, message = False, f"{type(exc).__name__}: {exc}"
+    finally:
+        _sys.stdout, _sys.stderr = saved_out, saved_err
+
+    output = buffer.getvalue().strip().splitlines()
+    with _SCAN_LOCK:
+        _SCAN_JOB.update({
+            "running": False,
+            "state": "completed" if ok else "failed",
+            "ok": ok,
+            "message": message,
+            "output": output[-40:],
+            "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        })
+
+
+def _start_scan():
+    with _SCAN_LOCK:
+        if _SCAN_JOB["running"]:
+            return False, dict(_SCAN_JOB)
+        _SCAN_JOB.update({
+            "running": True,
+            "state": "running",
+            "ok": None,
+            "message": "Scanning…",
+            "output": [],
+            "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "finished_at": None,
+        })
+        status = dict(_SCAN_JOB)
+    threading.Thread(target=_run_scan, name="kb-scan", daemon=True).start()
+    return True, status
+
+
 def _run_proposal_apply(pid):
     from . import apply as kb_apply
 
@@ -131,14 +239,14 @@ def _recall_components():
         if _RECALL:
             return _RECALL
         from qdrant_client import QdrantClient, models
-        from fastembed import TextEmbedding, SparseTextEmbedding
+        from . import embedding
         from . import recall as kb_recall
 
         _RECALL.update({
             "client": store.connect(kb_recall.QDRANT_TIMEOUT),
             "models": models,
-            "dense": TextEmbedding(kb_recall.DENSE_MODEL),
-            "sparse": SparseTextEmbedding(kb_recall.SPARSE_MODEL),
+            "dense": embedding.dense(kb_recall.DENSE_MODEL),
+            "sparse": embedding.sparse(kb_recall.SPARSE_MODEL),
             "kb_recall": kb_recall,
         })
         return _RECALL
@@ -249,6 +357,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/proposals/status":
             self._send_json(200, _proposal_status())
+        elif path == "/scan":
+            self._send_json(200, _scan_status())
         else:
             self._send_json(404, {"error": "not_found"})
 
@@ -272,6 +382,9 @@ class Handler(BaseHTTPRequestHandler):
             self._post_chat(body)
         elif path == "/settings":
             self._post_settings(body)
+        elif path == "/scan":
+            started, status = _start_scan()
+            self._send_json(202 if started else 409, status)
         else:
             self._send_json(404, {"error": "not_found"})
 

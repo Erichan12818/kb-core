@@ -136,13 +136,12 @@ def warm_models():
     thread; the UI is usable for browsing before it finishes.
     """
     try:
-        report("Preparing the search index (first run downloads ~2.3GB)…")
-        from fastembed import TextEmbedding, SparseTextEmbedding
-
+        from . import embedding
         from .config import cfg
 
-        TextEmbedding(cfg("embedding.dense_model"))
-        SparseTextEmbedding(cfg("embedding.sparse_model"))
+        report(f"Preparing the search index (first run downloads ~2.3GB to "
+               f"{embedding.cache_dir()})…")
+        embedding.pair(cfg("embedding.dense_model"), cfg("embedding.sparse_model"))
         report("Ready.")
     except Exception as e:
         report(f"Could not prepare the search index: {type(e).__name__}: {e}")

@@ -24,6 +24,22 @@ in your vault (`state/secrets.env`) rather than into the config file, and takes
 effect without a restart. Editing `kb_config.yaml` by hand still works and is
 what the rest of this page describes.
 
+Settings also covers where documents come from and go:
+
+- **Extra folders to read** — point at existing folders, including external
+  drives, instead of copying files into the vault. They are read strictly
+  read-only; nothing is moved or modified. A folder that is not mounted is
+  skipped, and what was already indexed from it is kept rather than deleted.
+- **Save new notes to** — where notes captured through `kb_add` (including
+  from a coding agent over MCP) are written. Wherever it points is always read
+  back, so those notes stay indexed and catalogued.
+- **Scan for new documents** — index now instead of waiting for the nightly
+  run. Output from the run is shown in the panel.
+
+Readable formats: `.txt` `.md` `.pdf` `.docx` `.xlsx` `.pptx` `.csv` `.json`
+`.yaml`. The legacy binary `.doc`, `.xls` and `.ppt` are not supported. Files
+above `ingest.max_file_mb` (25MB by default) are skipped.
+
 ## 1. Prepare config
 
 ```bash

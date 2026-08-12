@@ -13,9 +13,8 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
-from fastembed import TextEmbedding, SparseTextEmbedding
 from .config import cfg
-from . import store
+from . import embedding, store
 
 # ==================== 設定 ====================
 # vault 下的原始檔庫；實際位置由 kb_config.yaml 的 kb_root 控制。
@@ -33,7 +32,13 @@ SPARSE_MODEL = cfg("embedding.sparse_model")
 DENSE_DIM    = cfg("embedding.dense_dim")
 
 CHUNK_SIZE, CHUNK_OVERLAP = cfg("chunking.size"), cfg("chunking.overlap")
-SUPPORTED_EXT = {".txt", ".md", ".json", ".yaml", ".yml", ".pdf"}
+SUPPORTED_EXT = {
+    ".txt", ".md", ".json", ".yaml", ".yml", ".pdf",
+    # Office formats: only the modern zip/XML ones. The legacy binary .doc,
+    # .xls and .ppt need a different parser entirely and are left out rather
+    # than half-supported.
+    ".docx", ".xlsx", ".pptx", ".csv",
+}
 
 
 # ==================== 來源（vault 內 + 用戶指定路徑）====================
@@ -89,8 +94,19 @@ def configured_sources():
     Read at call time rather than import time so a path added in Settings
     applies to the next run without restarting the process.
     """
+    from .add import notes_root
+
     sources = [Source(SOURCE_ROOT, builtin=True)]
     seen = {str(sources[0].root)}
+
+    # Wherever notes are written is always read back, so a custom notes folder
+    # still reaches the index and the catalog. Without this, pointing notes
+    # somewhere else would quietly stop them being searchable at all.
+    notes = Source(notes_root(), builtin=True)
+    if str(notes.root) not in seen:
+        sources.append(notes)
+        seen.add(str(notes.root))
+
     for entry in cfg("sources", []) or []:
         if isinstance(entry, dict):
             raw, label = entry.get("path"), entry.get("label")
@@ -148,14 +164,115 @@ def classify_sensitivity(path: Path, text: str) -> str:
     return "public"
 
 # ==================== 讀檔 ====================
+# A single document cannot contribute more text than this. A 5MB spreadsheet
+# can hold millions of cells; without a ceiling one file could dominate both
+# the run time and the index.
+MAX_TEXT_CHARS = 2_000_000
+
+
+def _load_docx(path: Path) -> str:
+    """Paragraphs and table cells, in document order where the API allows."""
+    from docx import Document
+
+    doc = Document(str(path))
+    parts = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+            if cells:
+                parts.append("\t".join(cells))
+    return "\n".join(parts)
+
+
+def _load_xlsx(path: Path) -> str:
+    """Cell values sheet by sheet. Formulas read as their cached values."""
+    from openpyxl import load_workbook
+
+    book = load_workbook(str(path), read_only=True, data_only=True)
+    try:
+        parts, total = [], 0
+        for sheet in book.worksheets:
+            parts.append(f"# {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                if not cells:
+                    continue
+                line = "\t".join(cells)
+                total += len(line)
+                parts.append(line)
+                if total > MAX_TEXT_CHARS:
+                    parts.append("…（內容過長，已截斷）")
+                    return "\n".join(parts)
+        return "\n".join(parts)
+    finally:
+        book.close()
+
+
+def _load_pptx(path: Path) -> str:
+    """Text frames and table cells, slide by slide."""
+    from pptx import Presentation
+
+    deck = Presentation(str(path))
+    parts = []
+    for number, slide in enumerate(deck.slides, 1):
+        parts.append(f"# Slide {number}")
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape.text_frame.text.strip():
+                parts.append(shape.text_frame.text.strip())
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                    if cells:
+                        parts.append("\t".join(cells))
+    return "\n".join(parts)
+
+
+def _load_csv(path: Path) -> str:
+    """Rows as tab-separated lines, sniffing the delimiter where possible."""
+    import csv
+
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        dialect = csv.Sniffer().sniff(raw[:4096])
+    except csv.Error:
+        dialect = csv.excel
+    lines = []
+    for row in csv.reader(raw.splitlines(), dialect):
+        cells = [c.strip() for c in row if c and c.strip()]
+        if cells:
+            lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
+def _load_pdf(path: Path) -> str:
+    from langchain_community.document_loaders import PyPDFLoader
+
+    return "\n".join(d.page_content for d in PyPDFLoader(str(path)).load())
+
+
+# Office formats are read through their own libraries rather than a generic
+# extractor: each is a zip of XML, and the alternative (unstructured) pulls in
+# a far larger dependency tree than a desktop bundle should carry.
+LOADERS = {
+    ".pdf": _load_pdf,
+    ".docx": _load_docx,
+    ".xlsx": _load_xlsx,
+    ".pptx": _load_pptx,
+    ".csv": _load_csv,
+}
+PLAIN_EXT = {".txt", ".md", ".json", ".yaml", ".yml"}
+
+
 def load_text(path: Path) -> str:
     ext = path.suffix.lower()
-    if ext in {".txt", ".md", ".json", ".yaml", ".yml"}:
-        return path.read_text(encoding="utf-8", errors="replace")
-    if ext == ".pdf":
-        from langchain_community.document_loaders import PyPDFLoader
-        return "\n".join(d.page_content for d in PyPDFLoader(str(path)).load())
-    return ""
+    if ext in PLAIN_EXT:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    else:
+        loader = LOADERS.get(ext)
+        text = loader(path) if loader else ""
+    if len(text) > MAX_TEXT_CHARS:
+        text = text[:MAX_TEXT_CHARS] + "\n…（內容過長，已截斷）"
+    return text
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -199,8 +316,7 @@ def main():
         manifest = json.loads(Path(STATE_PATH).read_text(encoding="utf-8"))
 
     print("🔎 載入 embedding 模型（首次會下載 e5-large ~2.24GB）...")
-    dense = TextEmbedding(DENSE_MODEL)
-    sparse = SparseTextEmbedding(SPARSE_MODEL)
+    dense, sparse = embedding.pair(DENSE_MODEL, SPARSE_MODEL)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", "。", "！", "？", " ", ""],
@@ -247,8 +363,11 @@ def main():
 
             try:
                 text = load_text(fp)
-            except OSError as e:
-                print(f"  ⚠️  讀唔到，跳過：{fp.name}（{type(e).__name__}）")
+            except Exception as e:
+                # Broad on purpose: a corrupt .docx, a password-protected
+                # .xlsx or a missing optional parser must cost one file, not
+                # the whole run.
+                print(f"  ⚠️  讀唔到，跳過：{fp.name}（{type(e).__name__}: {e}）")
                 continue
             if looks_secret(fp, text):
                 skipped_secret.append(spath)
