@@ -157,7 +157,7 @@ def looks_secret(path: Path, text: str) -> bool:
     return content_hit
 
 # ==================== 敏感度（初期極簡：public/sensitive）====================
-SENSITIVE_HINT = re.compile(r"(機密|身分證|身份證|個人資料|個資|學生名單|成績單|輔導紀錄|病歷|信用卡|confidential|\bprivate\b|\bsecret\b)", re.I)
+SENSITIVE_HINT = re.compile(r"(機密|身分證|身份證|個人資料|個資|學生名單|成績單|輔導紀錄|病歷|信用卡|護照|passport|\bHKID\b|confidential|\bprivate\b|\bsecret\b)", re.I)
 def classify_sensitivity(path: Path, text: str) -> str:
     if SENSITIVE_HINT.search(str(path)) or SENSITIVE_HINT.search(text[:5000]):
         return "sensitive"
@@ -247,7 +247,18 @@ def _load_csv(path: Path) -> str:
 def _load_pdf(path: Path) -> str:
     from langchain_community.document_loaders import PyPDFLoader
 
-    return "\n".join(d.page_content for d in PyPDFLoader(str(path)).load())
+    text = "\n".join(d.page_content for d in PyPDFLoader(str(path)).load())
+    if text.strip():
+        return text
+    # No text layer at all — the common case is a scanned page, not an empty
+    # PDF. OCR only runs here, and only when the user turned it on: it is the
+    # difference between "this file contributed nothing" and "whatever this
+    # scan shows is now in the index."
+    from . import ocr as kb_ocr
+
+    if kb_ocr.enabled():
+        return kb_ocr.ocr_pdf(path)
+    return text
 
 
 # Office formats are read through their own libraries rather than a generic

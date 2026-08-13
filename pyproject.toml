@@ -21,6 +21,8 @@ dependencies = [
     "python-docx",
     "openpyxl",
     "python-pptx",
+    "rapidocr-onnxruntime",
+    "pymupdf",
 ]
 
 [project.scripts]

@@ -153,6 +153,7 @@ def read_settings():
         "url_fetcher": cfg("capture.url_fetcher", "") or "",
         "notes_dir": cfg("capture.notes_dir", "") or "",
         "notes_dir_effective": _notes_dir_effective(),
+        "ocr_enabled": bool(cfg("ocr.enabled", False)),
     }
 
 
@@ -314,6 +315,8 @@ def write_settings(payload):
     if url_fetcher and not Path(os.path.expanduser(url_fetcher)).exists():
         return False, f"No such URL fetcher: {url_fetcher}", current, False
 
+    ocr_enabled = current["ocr_enabled"] if given("ocr_enabled") is None else bool(payload["ocr_enabled"])
+
     notes_dir = current["notes_dir"] if given("notes_dir") is None else str(payload["notes_dir"]).strip()
     if notes_dir:
         # Unlike a read source, this one is written to — so it has to be
@@ -388,6 +391,7 @@ def write_settings(payload):
     capture = raw.setdefault("capture", {})
     capture["url_fetcher"] = url_fetcher
     capture["notes_dir"] = notes_dir
+    raw.setdefault("ocr", {})["enabled"] = ocr_enabled
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

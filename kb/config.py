@@ -43,6 +43,12 @@ DEFAULTS = {
         # cannot stall a run on a single huge file.
         "max_file_mb": 25,
     },
+    "ocr": {
+        # Off by default: a scanned page becomes searchable, verbatim, once
+        # this runs over it — see kb/ocr.py for why that stays opt-in.
+        "enabled": False,
+        "max_pages": 20,
+    },
     "chunking": {
         "size": 500,
         "overlap": 50,

@@ -227,24 +227,38 @@
     .results { display: grid; gap: 9px; }
 
     .result-card {
-      display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       background: var(--surface);
       overflow: hidden;
     }
 
-    .result-main { padding: 20px 22px; min-width: 0; }
-
-    .result-title-row { display: flex; align-items: baseline; gap: 14px; }
+    .result-summary-line {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      padding: 16px 22px;
+      cursor: pointer;
+      list-style: revert;
+    }
+    .result-summary-line::marker { color: var(--muted); }
+    .result-card[open] .result-summary-line { border-bottom: 1px solid var(--border); }
     .rank { color: var(--muted); font: 600 17px/1 var(--mono); min-width: 24px; }
-    .result-title { margin: 0; font-size: 17px; line-height: 1.35; }
-    .summary { margin: 7px 0 14px 38px; color: var(--muted); }
+    .result-title { font-size: 15px; line-height: 1.35; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .result-summary-category { color: var(--accent); font: 12px/1 var(--mono); white-space: nowrap; }
+    .result-summary-score { color: var(--muted); font: 12px/1 var(--mono); white-space: nowrap; }
+
+    .result-body {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr);
+    }
+
+    .result-main { padding: 20px 22px; min-width: 0; }
+    .summary { margin: 0 0 14px; color: var(--muted); }
 
     .excerpt-label {
       display: block;
-      margin: 0 0 6px 38px;
+      margin: 0 0 6px;
       color: var(--muted);
       font: 12px/1.2 var(--mono);
       text-transform: uppercase;
@@ -252,7 +266,7 @@
     }
 
     .excerpt {
-      margin: 0 0 0 38px;
+      margin: 0;
       border: 1px solid var(--border-soft);
       border-radius: 4px;
       background: #0a1219;
@@ -373,7 +387,7 @@
       .shell { width: min(100% - 24px, 1480px); }
       .header-inner { gap: 20px; }
       .search-form { grid-template-columns: 1fr 1fr; }
-      .result-card { grid-template-columns: 1fr; }
+      .result-body { grid-template-columns: 1fr; }
       .result-meta { border-left: 0; border-top: 1px solid var(--border); grid-template-columns: 1fr 1fr; }
       .health-grid { grid-template-columns: repeat(2, 1fr); }
       .proposal { grid-template-columns: 1fr; }
@@ -390,7 +404,7 @@
       .search-form { grid-template-columns: 1fr; }
       .routing-banner { align-items: start; flex-direction: column; }
       .result-main { padding: 17px 14px; }
-      .summary, .excerpt-label, .excerpt { margin-left: 0; }
+      .result-summary-line { padding: 13px 14px; flex-wrap: wrap; }
       .result-meta { grid-template-columns: 1fr; padding: 15px 14px; }
       .health-grid { grid-template-columns: 1fr; }
       .health-check + .health-check { border-left: 0; }
@@ -419,10 +433,10 @@
       <div class="brand">Almanac</div>
       <nav class="tabs" aria-label="Primary">
         <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel" data-tab="search">Search</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
-        <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="documents-panel" data-tab="documents">Documents</button>
+        <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel" data-tab="settings">Settings</button>
       </nav>
     </div>
@@ -623,6 +637,11 @@
           <input id="settings-api-port" type="number" min="1024" max="65535">
           <span class="field-hint">Loopback only. Almanac never listens on the network.</span>
         </label>
+        <label class="settings-check">
+          <input id="settings-ocr-enabled" type="checkbox">
+          <span>OCR scanned PDFs</span>
+        </label>
+        <p class="field-hint settings-ocr-hint">Off by default. A scanned page — a filed ID card, a signed form — currently contributes nothing to the index; turning this on means whatever is drawn on that page gets read and indexed, verbatim. Runs entirely on this machine, applies to future scans (not retroactively), and only to a PDF page with no text layer at all — a PDF that already has real text is never re-OCR'd.</p>
 
         <button id="settings-save" class="button" type="submit">Save settings</button>
       </form>
@@ -677,18 +696,29 @@
     }
 
     function resultCard(result) {
-      const card = document.createElement("article");
+      // <details> rather than always-expanded: with more than a couple of
+      // hits, showing every excerpt and the full metadata sidebar for all of
+      // them at once turns the page into a wall of text before the user has
+      // picked which result is worth reading. Collapsed by default; the
+      // summary line alone (rank, title, category, score) is enough to scan.
+      const card = document.createElement("details");
       card.className = "result-card";
 
-      const main = appendText(card, "div", "result-main", "");
-      const titleRow = appendText(main, "div", "result-title-row", "");
-      appendText(titleRow, "span", "rank", result.rank);
-      appendText(titleRow, "h2", "result-title", result.idx_title || result.source_file || "Untitled source");
+      const summary = document.createElement("summary");
+      summary.className = "result-summary-line";
+      appendText(summary, "span", "rank", result.rank);
+      appendText(summary, "span", "result-title", result.idx_title || result.source_file || "Untitled source");
+      appendText(summary, "span", "result-summary-category", result.category || "_uncategorized");
+      appendText(summary, "span", "result-summary-score", Number(result.score || 0).toFixed(3));
+      card.appendChild(summary);
+
+      const body = appendText(card, "div", "result-body", "");
+      const main = appendText(body, "div", "result-main", "");
       appendText(main, "p", "summary", result.idx_summary || "No stored summary.");
       appendText(main, "span", "excerpt-label", "Matching chunk");
       appendText(main, "pre", "excerpt", result.text || "");
 
-      const meta = appendText(card, "aside", "result-meta", "");
+      const meta = appendText(body, "aside", "result-meta", "");
       const pathRow = appendText(meta, "div", "meta-row", "");
       appendText(pathRow, "span", "meta-label", "source_path");
       appendText(pathRow, "span", "path", result.source_path || result.source_file || "");
@@ -1054,6 +1084,7 @@
       byId("settings-top-k").value = settings.top_k;
       byId("settings-api-port").value = settings.api_port;
       byId("settings-url-fetcher").value = settings.url_fetcher || "";
+      byId("settings-ocr-enabled").checked = !!settings.ocr_enabled;
       byId("settings-notes-dir").value = settings.notes_dir || "";
       byId("settings-notes-dir-hint").textContent =
         `Notes you or an agent capture are written here, and always read back into the index — ${settings.notes_dir_effective || ""}`;
@@ -1207,6 +1238,7 @@
             top_k: byId("settings-top-k").value,
             api_port: byId("settings-api-port").value,
             url_fetcher: byId("settings-url-fetcher").value.trim(),
+            ocr_enabled: byId("settings-ocr-enabled").checked,
             notes_dir: byId("settings-notes-dir").value.trim(),
           }),
         });
