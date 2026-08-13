@@ -200,6 +200,59 @@ def add_entry(content, category="inbox", title=None, ingest=True, async_ingest=F
     }
 
 
+def add_file(data, filename, category="inbox", ingest=True, async_ingest=False):
+    """Save an uploaded file's bytes as-is; the caller already has the finished document.
+
+    Unlike add_entry(), which always wraps content in a generated .md, this
+    keeps the original filename and extension — that is what tells kb.ingest
+    which loader to use (.docx/.xlsx/.pptx/.pdf/...), and a colleague's
+    finished report should not have to be retyped into a text box to reach
+    the index.
+    """
+    from . import ingest as kb_ingest
+
+    root = notes_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(
+            f"筆記目錄寫唔到：{root}（{type(e).__name__}: {e}）"
+            "\n如果嗰個位置係外置碟或者網絡碟，請先掛載，或者喺設定改返。"
+        ) from e
+
+    cap = kb_ingest.max_file_bytes()
+    if len(data) > cap:
+        raise ValueError(f"檔案太大（{len(data)} bytes），上限係 {cap} bytes")
+
+    # The name is client-supplied — take only the leaf, and only the
+    # characters slugify() already treats as safe for a category, so it
+    # cannot carry a path (e.g. "../../x") out of the upload folder.
+    safe_name = os.path.basename(filename or "upload")
+    stem, ext = os.path.splitext(safe_name)
+    safe_stem = slugify(stem) or "upload"
+    ext = ext.lower()
+    readable = ext in kb_ingest.SUPPORTED_EXT
+
+    category = safe_category(category)
+    out_dir = root / category
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = unique_path(out_dir, f"{safe_stem}{ext}")
+    out_path.write_bytes(data)
+    rel_file = f"{category}/{out_path.name}"
+
+    if ingest and readable:
+        _run_ingest(rel_file, background=async_ingest)
+
+    return {
+        "file": rel_file,
+        "path": str(out_path),
+        "bytes": len(data),
+        "readable": readable,
+        "ingest": bool(ingest and readable),
+        "async_ingest": bool(ingest and readable and async_ingest),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("content", help="URL 或一段文字")

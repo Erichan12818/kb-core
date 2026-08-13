@@ -437,6 +437,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/add":
             self._post_add(body)
+        elif path == "/upload":
+            self._post_upload(body)
         elif path == "/recall":
             self._post_recall(body)
         elif path == "/proposals":
@@ -514,6 +516,35 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(201, {"file": result["file"], "path": result["path"], "ingest": "queued"})
         except Exception as e:
             self._send_json(503, {"error": f"KB 入庫不可用（{type(e).__name__}）：{e}"})
+
+    def _post_upload(self, body):
+        """Save an uploaded file's bytes as-is — a finished document, not text to retype."""
+        import base64
+
+        filename = (body.get("filename") or "").strip()
+        encoded = body.get("content_base64") or ""
+        if not filename or not encoded:
+            self._send_json(400, {"error": "filename and content_base64 required"})
+            return
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except Exception:
+            self._send_json(400, {"error": "content_base64 is not valid base64"})
+            return
+        category = (body.get("category") or "inbox").strip() or "inbox"
+        try:
+            from . import add as kb_add
+            result = kb_add.add_file(data, filename, category=category, ingest=True, async_ingest=True)
+            self._send_json(201, {
+                "file": result["file"],
+                "path": result["path"],
+                "readable": result["readable"],
+                "ingest": "queued" if result["ingest"] else "skipped",
+            })
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+        except Exception as e:
+            self._send_json(503, {"error": f"上載不可用（{type(e).__name__}）：{e}"})
 
     def _post_recall(self, body):
         query = (body.get("query") or "").strip()

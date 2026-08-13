@@ -467,6 +467,7 @@
       <div class="brand">Almanac</div>
       <nav class="tabs" aria-label="Primary">
         <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel" data-tab="search">Search</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="capture-panel" data-tab="capture">Capture</button>
         <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
@@ -531,6 +532,44 @@
         <div id="documents-status" class="status-line" aria-live="polite"></div>
         <div id="documents-list" class="documents-list"></div>
       </div>
+    </section>
+
+    <section id="capture-panel" role="tabpanel" data-panel="capture" hidden>
+      <div class="panel-heading">
+        <div>
+          <h1>Capture</h1>
+          <p class="lede">Saved exactly as given — nothing here is rewritten or summarized by a model. A URL is fetched and stored as markdown if a URL capture command is configured (Settings); otherwise paste text directly.</p>
+        </div>
+      </div>
+
+      <form id="capture-text-form" class="settings-form">
+        <label>
+          <span class="field-label">Text or URL</span>
+          <textarea id="capture-content" rows="6" placeholder="Paste a URL, or write a note" required></textarea>
+        </label>
+        <label>
+          <span class="field-label">Category</span>
+          <input id="capture-category" list="capture-category-options" placeholder="inbox" autocomplete="off">
+          <datalist id="capture-category-options"></datalist>
+        </label>
+        <button id="capture-save" class="button" type="submit">Save</button>
+      </form>
+      <div id="capture-status" class="status-line" aria-live="polite"></div>
+
+      <h2 class="settings-heading">Upload a finished document</h2>
+      <p class="field-hint">Already-written files — a colleague's report, a signed form — go in as-is; nothing is regenerated. Readable formats: .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml. Other types are still saved, but will not be searchable.</p>
+      <form id="capture-upload-form" class="settings-form">
+        <label>
+          <span class="field-label">File</span>
+          <input id="capture-file" type="file" required>
+        </label>
+        <label>
+          <span class="field-label">Category</span>
+          <input id="capture-upload-category" list="capture-category-options" placeholder="inbox" autocomplete="off">
+        </label>
+        <button id="capture-upload" class="button secondary" type="submit">Upload</button>
+      </form>
+      <div id="capture-upload-status" class="status-line" aria-live="polite"></div>
     </section>
 
     <section id="proposals-panel" role="tabpanel" data-panel="proposals" hidden>
@@ -808,6 +847,17 @@
       "Add this to your client's MCP config, then restart it:": "將呢段加入你客戶端嘅 MCP 設定，再重啟：",
       "No tags yet": "暫未有標籤",
       "No stored summary.": "未有儲存摘要。",
+      "Capture": "記錄",
+      "Saved exactly as given — nothing here is rewritten or summarized by a model. A URL is fetched and stored as markdown if a URL capture command is configured (Settings); otherwise paste text directly.":
+        "會原封不動咁儲存——呢度嘅內容唔會被任何模型改寫或總結。如果 Settings 有配置網址擷取指令，網址會自動攞返轉做 markdown；否則直接貼文字。",
+      "Text or URL": "文字或網址",
+      "Paste a URL, or write a note": "貼一個網址，或者寫一段筆記",
+      "Save": "儲存",
+      "Upload a finished document": "上載已完成嘅文件",
+      "Already-written files — a colleague's report, a signed form — go in as-is; nothing is regenerated. Readable formats: .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml. Other types are still saved, but will not be searchable.":
+        "已經寫好嘅檔案——例如同事嘅報告、簽署咗嘅表格——會原封不動咁存入，唔會重新生成。支援格式：.txt .md .pdf .docx .xlsx .pptx .csv .json .yaml。其他格式都會儲存，但搜尋唔到。",
+      "File": "檔案",
+      "Upload": "上載",
       "Matching chunk": "匹配片段",
       "source_path": "source_path", "category": "category", "similarity": "similarity",
     };
@@ -896,16 +946,86 @@
       try {
         const data = await fetchJSON("/taxonomy");
         const select = byId("category");
+        const datalist = byId("capture-category-options");
         for (const category of data.categories || []) {
           const option = document.createElement("option");
           option.value = category;
           option.textContent = category;
           select.appendChild(option);
+          datalist.appendChild(option.cloneNode(true));
         }
       } catch (error) {
         setStatus(byId("search-status"), `Taxonomy unavailable: ${error.message}`, "error");
       }
     }
+
+    byId("capture-text-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = byId("capture-status");
+      const button = byId("capture-save");
+      const content = byId("capture-content").value.trim();
+      if (!content) return;
+      button.disabled = true;
+      setStatus(status, "Saving…");
+      try {
+        const data = await fetchJSON("/add", {
+          method: "POST",
+          body: JSON.stringify({
+            content,
+            category: byId("capture-category").value.trim() || "inbox",
+          }),
+        });
+        setStatus(status, `Saved to ${data.file}. Ingest queued.`, "success");
+        byId("capture-content").value = "";
+      } catch (error) {
+        setStatus(status, error.message, "error");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(",", 2)[1] || "");
+        reader.onerror = () => reject(reader.error || new Error("Could not read the file"));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    byId("capture-upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = byId("capture-upload-status");
+      const button = byId("capture-upload");
+      const input = byId("capture-file");
+      const file = input.files[0];
+      if (!file) return;
+      button.disabled = true;
+      setStatus(status, `Uploading ${file.name}…`);
+      try {
+        const content_base64 = await fileToBase64(file);
+        const data = await fetchJSON("/upload", {
+          method: "POST",
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64,
+            category: byId("capture-upload-category").value.trim() || "inbox",
+          }),
+        });
+        setStatus(
+          status,
+          data.readable
+            ? `Saved to ${data.file}. Ingest queued.`
+            : `Saved to ${data.file}, but this format is not readable — it will not be searchable.`,
+          data.readable ? "success" : "error",
+        );
+        input.value = "";
+      } catch (error) {
+        setStatus(status, error.message, "error");
+      } finally {
+        button.disabled = false;
+      }
+    });
 
     function resultCard(result) {
       // <details> rather than always-expanded: with more than a couple of
