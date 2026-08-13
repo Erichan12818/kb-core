@@ -154,7 +154,24 @@ def read_settings():
         "notes_dir": cfg("capture.notes_dir", "") or "",
         "notes_dir_effective": _notes_dir_effective(),
         "ocr_enabled": bool(cfg("ocr.enabled", False)),
+        # MCP
+        "mcp_python": _mcp_python_hint(),
+        "mcp_config_path": str(config_path()),
+        "mcp_root_path": vault,
     }
+
+
+def _mcp_python_hint():
+    """Best-guess interpreter for `python -m kb.mcp`, for the Settings guide.
+
+    The running app is a frozen bundle with no bearing on where a pip/pipx
+    install of kb-core lives — this only looks for the common case (pipx)
+    and otherwise says so rather than guessing further.
+    """
+    pipx_python = Path.home() / ".local" / "pipx" / "venvs" / "kb-core" / "bin" / "python3"
+    if pipx_python.exists():
+        return str(pipx_python)
+    return None
 
 
 def _notes_dir_effective():

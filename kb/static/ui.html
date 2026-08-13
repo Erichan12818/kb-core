@@ -83,6 +83,26 @@
     .tab:hover { color: var(--text); }
     .tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
 
+    .search-mode-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 26px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 4px;
+      width: fit-content;
+    }
+    .search-mode-tab {
+      border: 0;
+      border-radius: calc(var(--radius) - 4px);
+      padding: 8px 18px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .search-mode-tab[aria-selected="true"] { color: var(--bg); background: var(--accent); }
+
     main { padding: 34px 0 56px; }
 
     .panel-heading {
@@ -353,6 +373,10 @@
       font-size: 12px;
     }
 
+    .mcp-steps { margin: 10px 0 16px; padding-left: 22px; color: var(--text); }
+    .mcp-steps li { margin-bottom: 10px; line-height: 1.5; }
+    .mcp-steps code { color: var(--accent); }
+
     .documents-toolbar { display: flex; gap: 14px; margin: 4px 0 18px; }
     .documents-toolbar input { flex: 1; }
     .documents-toolbar select { max-width: 240px; }
@@ -433,7 +457,6 @@
       <div class="brand">Almanac</div>
       <nav class="tabs" aria-label="Primary">
         <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel" data-tab="search">Search</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="documents-panel" data-tab="documents">Documents</button>
         <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
@@ -444,32 +467,56 @@
 
   <main class="shell">
     <section id="search-panel" role="tabpanel" data-panel="search">
-      <form id="search-form" class="search-form">
-        <label>
-          <span class="field-label">Query</span>
-          <input id="query" name="query" type="search" placeholder="Search your knowledge base" autocomplete="off" required>
-        </label>
-        <label>
-          <span class="field-label">Category</span>
-          <select id="category" name="category">
-            <option value="">All categories</option>
-          </select>
-        </label>
-        <label>
-          <span class="field-label">Top K</span>
-          <input id="top-k" name="top_k" type="number" value="4" min="1" max="20">
-        </label>
-        <button id="search-button" class="button" type="submit">Search</button>
-      </form>
+      <nav class="search-mode-tabs" aria-label="Search mode">
+        <button id="search-mode-query" class="search-mode-tab" type="button" aria-selected="true">By query</button>
+        <button id="search-mode-tag" class="search-mode-tab" type="button" aria-selected="false">By tag</button>
+      </nav>
 
-      <div id="routing-banner" class="routing-banner" hidden>
-        <span>Narrowed to category <strong id="guessed-category"></strong></span>
-        <button id="global-search" class="link-button" type="button">Search the whole KB →</button>
+      <div id="search-by-query" data-search-mode="query">
+        <form id="search-form" class="search-form">
+          <label>
+            <span class="field-label">Query</span>
+            <input id="query" name="query" type="search" placeholder="Search your knowledge base" autocomplete="off" required>
+          </label>
+          <label>
+            <span class="field-label">Category</span>
+            <select id="category" name="category">
+              <option value="">All categories</option>
+            </select>
+          </label>
+          <label>
+            <span class="field-label">Top K</span>
+            <input id="top-k" name="top_k" type="number" value="4" min="1" max="20">
+          </label>
+          <button id="search-button" class="button" type="submit">Search</button>
+        </form>
+
+        <div id="routing-banner" class="routing-banner" hidden>
+          <span>Narrowed to category <strong id="guessed-category"></strong></span>
+          <button id="global-search" class="link-button" type="button">Search the whole KB →</button>
+        </div>
+
+        <div id="search-status" class="status-line" aria-live="polite">Enter a query to retrieve raw source excerpts.</div>
+        <div id="results"></div>
+        <p class="footer-note">Retrieval only: Almanac displays stored excerpts and source paths. It does not generate or summarize answers.</p>
       </div>
 
-      <div id="search-status" class="status-line" aria-live="polite">Enter a query to retrieve raw source excerpts.</div>
-      <div id="results"></div>
-      <p class="footer-note">Retrieval only: Almanac displays stored excerpts and source paths. It does not generate or summarize answers.</p>
+      <div id="search-by-tag" data-search-mode="tag" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="lede">Every document the catalog has classified, with its title, topic tags, and category. A blank tag list means either the document was too short to classify, or no LLM role is configured — see Settings → Ask.</p>
+          </div>
+          <button id="refresh-documents" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div class="documents-toolbar">
+          <input id="documents-filter" type="search" placeholder="Filter by title, tag, or category" autocomplete="off">
+          <select id="documents-category-filter">
+            <option value="">All categories</option>
+          </select>
+        </div>
+        <div id="documents-status" class="status-line" aria-live="polite"></div>
+        <div id="documents-list" class="documents-list"></div>
+      </div>
     </section>
 
     <section id="proposals-panel" role="tabpanel" data-panel="proposals" hidden>
@@ -514,23 +561,6 @@
       <div id="directory-stats"></div>
     </section>
 
-    <section id="documents-panel" role="tabpanel" data-panel="documents" hidden>
-      <div class="panel-heading">
-        <div>
-          <h1>Documents</h1>
-          <p class="lede">Every document the catalog has classified, with its title, topic tags, and category. A blank tag list means either the document was too short to classify, or no LLM role is configured — see Settings → Ask.</p>
-        </div>
-        <button id="refresh-documents" class="button secondary" type="button">Refresh</button>
-      </div>
-      <div class="documents-toolbar">
-        <input id="documents-filter" type="search" placeholder="Filter by title, tag, or category" autocomplete="off">
-        <select id="documents-category-filter">
-          <option value="">All categories</option>
-        </select>
-      </div>
-      <div id="documents-status" class="status-line" aria-live="polite"></div>
-      <div id="documents-list" class="documents-list"></div>
-    </section>
 
     <section id="settings-panel" role="tabpanel" data-panel="settings" hidden>
       <div class="panel-heading">
@@ -648,6 +678,15 @@
 
       <div id="settings-status" class="status-line" aria-live="polite"></div>
       <p class="footer-note">The API key is stored in a <code>0600</code> file inside your vault, not in the config file, and is never sent back to this page. Automatic titles and tags use the same provider. The embedding model, vector size, and chunking are not settings: changing them would invalidate everything already indexed, so they stay in the config file.</p>
+
+      <h2 class="settings-heading">Connect a coding agent (MCP)</h2>
+      <p class="lede">Almanac's search and capture are also available as MCP tools (<code>kb_recall</code>, <code>kb_add</code>, <code>kb_status</code>) to any MCP-capable client — Claude Code, Claude Desktop, Cline, Continue.dev. The agent gets raw excerpts and composes freely; it is not limited to Ask's citation-only answers.</p>
+      <ol id="mcp-guide-steps" class="mcp-steps">
+        <li>Install the engine separately from this app (the MCP server needs a Python environment, which the desktop bundle does not expose): <code>pipx install "git+https://github.com/Erichan12818/kb-core.git"</code></li>
+        <li>Add this to your client's MCP config, then restart it:</li>
+      </ol>
+      <pre id="mcp-config-snippet" class="scan-output"></pre>
+      <p class="field-hint" id="mcp-guide-fallback" hidden>Could not find a pipx install of kb-core on this machine yet — run the command above first, then reload this page for the exact path.</p>
     </section>
   </main>
 
@@ -928,8 +967,17 @@
       if (name === "proposals") loadProposals();
       if (name === "health") loadHealth();
       if (name === "settings") loadSettings();
-      if (name === "documents") loadDocuments();
     }
+
+    function setSearchMode(mode) {
+      byId("search-mode-query").setAttribute("aria-selected", String(mode === "query"));
+      byId("search-mode-tag").setAttribute("aria-selected", String(mode === "tag"));
+      byId("search-by-query").hidden = mode !== "query";
+      byId("search-by-tag").hidden = mode !== "tag";
+      if (mode === "tag") loadDocuments();
+    }
+    byId("search-mode-query").addEventListener("click", () => setSearchMode("query"));
+    byId("search-mode-tag").addEventListener("click", () => setSearchMode("tag"));
 
     byId("search-form").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1095,6 +1143,7 @@
       byId("settings-index-path").textContent = settings.index_path || "";
       byId("settings-secrets-path").textContent = settings.secrets_path || "";
       byId("settings-model-cache-path").textContent = settings.model_cache_path || "";
+      renderMcpGuide(settings);
 
       const sources = settings.sources || [];
       byId("settings-sources").value = sources.map((s) => s.path).join("\n");
@@ -1117,6 +1166,24 @@
         hints.push("This is a removable volume — keep it mounted before launching.");
       }
       byId("settings-vault-hint").textContent = hints.join(" ");
+    }
+
+    function renderMcpGuide(settings) {
+      const python = settings.mcp_python;
+      byId("mcp-guide-fallback").hidden = !!python;
+      const config = {
+        mcpServers: {
+          almanac: {
+            command: python || "<path to a pipx/pip install of kb-core>python3",
+            args: ["-m", "kb.mcp"],
+            env: {
+              KB_CONFIG: settings.mcp_config_path || "",
+              KB_ROOT: settings.mcp_root_path || "",
+            },
+          },
+        },
+      };
+      byId("mcp-config-snippet").textContent = JSON.stringify(config, null, 2);
     }
 
     async function loadSettings() {
