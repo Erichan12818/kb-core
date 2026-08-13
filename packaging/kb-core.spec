@@ -87,6 +87,7 @@ if sys.platform == "darwin":
         coll,
         name="kb-core.app",
         bundle_identifier="app.mybuilt.kbcore",
+        icon=str(REPO / "packaging" / "assets" / "almanac.icns"),
         info_plist={
             "CFBundleName": "Almanac",
             "CFBundleDisplayName": "Almanac",
