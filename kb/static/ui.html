@@ -505,19 +505,44 @@
 
         <h2 class="settings-heading">Ask</h2>
         <label>
-          <span class="field-label">Provider URL</span>
-          <input id="settings-base-url" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off">
-          <span class="field-hint">Any OpenAI-compatible endpoint.</span>
+          <span class="field-label">Provider</span>
+          <select id="settings-ask-provider">
+            <option value="cloud">Cloud (API key)</option>
+            <option value="local">Local (Ollama)</option>
+          </select>
+          <span class="field-hint">Local keeps everything on this machine — no key, no network call. Cloud reaches whatever OpenAI-compatible endpoint you name, including Anthropic's or OpenAI's own API (a separate account and key from a Claude or ChatGPT subscription — those are not API access).</span>
         </label>
-        <label>
-          <span class="field-label">Model</span>
-          <input id="settings-model" type="text" placeholder="deepseek-v4-flash" autocomplete="off">
-        </label>
-        <label>
-          <span class="field-label">API key</span>
-          <input id="settings-api-key" type="password" placeholder="Leave blank to keep the saved key" autocomplete="off">
-          <span class="field-hint" id="settings-key-state"></span>
-        </label>
+
+        <div id="settings-ask-cloud">
+          <label>
+            <span class="field-label">Provider URL</span>
+            <input id="settings-base-url" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off">
+            <span class="field-hint">Any OpenAI-compatible endpoint — DeepSeek, OpenAI, Anthropic, Groq, etc.</span>
+          </label>
+          <label>
+            <span class="field-label">Model</span>
+            <input id="settings-model" type="text" placeholder="deepseek-v4-flash" autocomplete="off">
+          </label>
+          <label>
+            <span class="field-label">API key</span>
+            <input id="settings-api-key" type="password" placeholder="Leave blank to keep the saved key" autocomplete="off">
+            <span class="field-hint" id="settings-key-state"></span>
+          </label>
+        </div>
+
+        <div id="settings-ask-local">
+          <label>
+            <span class="field-label">Ollama URL</span>
+            <input id="settings-ollama-url" type="url" placeholder="http://localhost:11434" autocomplete="off">
+            <span class="field-hint">Where Ollama is listening — localhost if it runs on this machine.</span>
+          </label>
+          <label>
+            <span class="field-label">Model</span>
+            <input id="settings-ollama-model" type="text" placeholder="qwen2.5:14b" autocomplete="off">
+            <span class="field-hint">Must already be pulled — <code>ollama pull qwen2.5:14b</code>.</span>
+          </label>
+        </div>
+
         <label class="settings-check">
           <input id="settings-chat-enabled" type="checkbox">
           <span>Turn on the Ask tab</span>
@@ -960,8 +985,15 @@
 
     function renderSettings(settings) {
       byId("settings-vault").value = settings.vault || "";
+      byId("settings-ask-provider").value = settings.ask_provider || "cloud";
       byId("settings-base-url").value = settings.base_url || "";
-      byId("settings-model").value = settings.model || "";
+      byId("settings-ollama-url").value = settings.ollama_url || "";
+      if (settings.ask_provider === "local") {
+        byId("settings-ollama-model").value = settings.model || "";
+      } else {
+        byId("settings-model").value = settings.model || "";
+      }
+      toggleAskProvider();
       byId("settings-chat-enabled").checked = !!settings.chat_enabled;
       byId("settings-top-k").value = settings.top_k;
       byId("settings-api-port").value = settings.api_port;
@@ -1023,13 +1055,19 @@
       setStatus(status, "Saving…");
       byId("settings-save").disabled = true;
       try {
+        const askProvider = byId("settings-ask-provider").value;
+        const model = askProvider === "local"
+          ? byId("settings-ollama-model").value.trim()
+          : byId("settings-model").value.trim();
         const data = await fetchJSON("/settings", {
           method: "POST",
           body: JSON.stringify({
             vault: byId("settings-vault").value.trim(),
             sources: byId("settings-sources").value,
+            ask_provider: askProvider,
             base_url: byId("settings-base-url").value.trim(),
-            model: byId("settings-model").value.trim(),
+            ollama_url: byId("settings-ollama-url").value.trim(),
+            model: model,
             api_key: byId("settings-api-key").value,
             chat_enabled: byId("settings-chat-enabled").checked,
             top_k: byId("settings-top-k").value,
@@ -1057,6 +1095,13 @@
       event.preventDefault();
       saveSettings();
     });
+
+    function toggleAskProvider() {
+      const local = byId("settings-ask-provider").value === "local";
+      byId("settings-ask-cloud").hidden = local;
+      byId("settings-ask-local").hidden = !local;
+    }
+    byId("settings-ask-provider").addEventListener("change", toggleAskProvider);
 
     function renderScan(status) {
       const line = byId("scan-status");

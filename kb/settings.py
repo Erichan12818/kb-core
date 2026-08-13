@@ -53,9 +53,9 @@ def secrets_path():
     return Path(cfg("kb_root")) / "state" / SECRETS_FILENAME
 
 
-def _provider_conf():
+def _provider_conf(name="cloud"):
     providers = cfg("llm.providers", {}) or {}
-    conf = providers.get("cloud")
+    conf = providers.get(name)
     return conf if isinstance(conf, dict) else {}
 
 
@@ -121,11 +121,13 @@ def read_settings():
     """Current settings for the UI. Never includes the key itself."""
     from . import desktop
 
-    conf = _provider_conf()
+    cloud = _provider_conf("cloud")
+    local = _provider_conf("local")
     roles = cfg("llm.roles", {}) or {}
     chat_role = roles.get(CHAT_ROLE) if isinstance(roles.get(CHAT_ROLE), dict) else {}
     vault = str(cfg("kb_root"))
     pointer = desktop.read_vault_pointer()
+    ask_provider = chat_role.get("provider") if chat_role.get("provider") in ("cloud", "local") else "cloud"
     return {
         # Storage
         "vault": vault,
@@ -138,10 +140,12 @@ def read_settings():
         "model_cache_path": _model_cache_path(),
         "sources": _read_sources(),
         # Ask
-        "base_url": conf.get("base_url") or "",
-        "model": chat_role.get("model") or cfg("llm.classify_cloud", "") or "",
-        "key_env": conf.get("key_env") or "DEEPSEEK_API_KEY",
+        "ask_provider": ask_provider,
+        "base_url": cloud.get("base_url") or "",
+        "model": chat_role.get("model") or (cfg("llm.classify_cloud", "") if ask_provider == "cloud" else "") or "",
+        "key_env": cloud.get("key_env") or "DEEPSEEK_API_KEY",
         "has_api_key": has_api_key(),
+        "ollama_url": local.get("url") or "http://localhost:11434",
         "chat_enabled": bool(chat_role.get("provider") and chat_role.get("model")),
         # Search and server
         "top_k": cfg("recall.top_k", 4),
@@ -271,7 +275,11 @@ def write_settings(payload):
     def given(name):
         return payload.get(name) if name in payload else None
 
+    ask_provider = current["ask_provider"] if given("ask_provider") is None else str(payload["ask_provider"]).strip()
+    if ask_provider not in ("cloud", "local"):
+        return False, "Ask provider must be 'cloud' or 'local'.", current, False
     base_url = current["base_url"] if given("base_url") is None else str(payload["base_url"]).strip()
+    ollama_url = current["ollama_url"] if given("ollama_url") is None else str(payload["ollama_url"]).strip()
     model = current["model"] if given("model") is None else str(payload["model"]).strip()
     chat_enabled = (
         current["chat_enabled"]
@@ -301,6 +309,8 @@ def write_settings(payload):
         return False, "A model name is required to turn on Ask.", current, False
     if base_url and not base_url.startswith(("http://", "https://")):
         return False, "The provider URL must start with http:// or https://.", current, False
+    if not ollama_url.startswith(("http://", "https://")):
+        return False, "The Ollama URL must start with http:// or https://.", current, False
     if url_fetcher and not Path(os.path.expanduser(url_fetcher)).exists():
         return False, f"No such URL fetcher: {url_fetcher}", current, False
 
@@ -315,7 +325,7 @@ def write_settings(payload):
 
     key_name = current["key_env"] or "DEEPSEEK_API_KEY"
     api_key = str(payload.get("api_key") or "").strip()
-    if chat_enabled and not api_key and not current["has_api_key"]:
+    if chat_enabled and ask_provider == "cloud" and not api_key and not current["has_api_key"]:
         return False, f"An API key is required to turn on Ask ({key_name}).", current, False
 
     # The vault is resolved before the config write so a bad path fails before
@@ -345,17 +355,21 @@ def write_settings(payload):
 
     llm = raw.setdefault("llm", {})
     providers = llm.setdefault("providers", {})
-    cloud = providers.setdefault("cloud", {})
-    cloud.setdefault("type", "openai_compat")
+    cloud_conf = providers.setdefault("cloud", {})
+    cloud_conf.setdefault("type", "openai_compat")
     if base_url:
-        cloud["base_url"] = base_url
-    cloud["key_env"] = key_name
+        cloud_conf["base_url"] = base_url
+    cloud_conf["key_env"] = key_name
 
     if api_key:
         try:
-            cloud["key_env_file"] = str(_write_secret(key_name, api_key))
+            cloud_conf["key_env_file"] = str(_write_secret(key_name, api_key))
         except OSError as exc:
             return False, f"Could not save the API key: {exc}", current, False
+
+    local_conf = providers.setdefault("local", {})
+    local_conf.setdefault("type", "ollama")
+    local_conf["url"] = ollama_url
 
     roles = llm.setdefault("roles", {})
     if not isinstance(roles, dict):
@@ -363,7 +377,7 @@ def write_settings(payload):
         llm["roles"] = roles
     if chat_enabled:
         chat_role = roles.setdefault(CHAT_ROLE, {})
-        chat_role["provider"] = "cloud"
+        chat_role["provider"] = ask_provider
         chat_role["model"] = model
     else:
         roles.pop(CHAT_ROLE, None)
