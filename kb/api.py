@@ -17,8 +17,9 @@ _RECALL = {}
 _RECALL_LOCK = threading.Lock()
 _PROPOSAL_LOCK = threading.Lock()
 _SCAN_LOCK = threading.Lock()
-# One scan at a time: the embedded store admits a single writer, and two
-# concurrent runs would fight over the same manifest.
+_CATALOG_LOCK = threading.Lock()
+# One job of each kind at a time: the embedded store admits a single writer,
+# and two concurrent runs would fight over the same manifest/INDEX.
 _SCAN_JOB = {
     "running": False,
     "state": "idle",
@@ -28,6 +29,7 @@ _SCAN_JOB = {
     "started_at": None,
     "finished_at": None,
 }
+_CATALOG_JOB = dict(_SCAN_JOB)
 _PROPOSAL_JOB = {
     "running": False,
     "state": "idle",
@@ -130,8 +132,13 @@ class _Tee:
         return bool(self._original is not None and getattr(self._original, "isatty", bool)())
 
 
-def _run_scan():
-    """Run ingest in-process, keeping a copy of its console output for the UI."""
+def _run_job(lock, job, target, ok_message, running_message):
+    """Run ``target`` in a background thread, tee-ing its print() output.
+
+    Shared by scan (ingest) and catalog rebuild (index_update) — same shape,
+    same failure modes (SystemExit on "nothing to do", exceptions on real
+    failure), same reason to keep the request log flowing through undisturbed.
+    """
     import io
     import sys as _sys
 
@@ -141,21 +148,18 @@ def _run_scan():
     _sys.stdout = _Tee(saved_out, buffer, owner)
     _sys.stderr = _Tee(saved_err, buffer, owner)
     try:
-        from . import ingest as kb_ingest
-
-        kb_ingest.main()
-        ok, message = True, "Scan finished."
+        target()
+        ok, message = True, ok_message
     except SystemExit as exc:
-        # ingest calls sys.exit() when no source is readable.
-        ok, message = False, str(exc) or "Scan stopped."
+        ok, message = False, str(exc) or "Stopped."
     except Exception as exc:
         ok, message = False, f"{type(exc).__name__}: {exc}"
     finally:
         _sys.stdout, _sys.stderr = saved_out, saved_err
 
     output = buffer.getvalue().strip().splitlines()
-    with _SCAN_LOCK:
-        _SCAN_JOB.update({
+    with lock:
+        job.update({
             "running": False,
             "state": "completed" if ok else "failed",
             "ok": ok,
@@ -165,22 +169,52 @@ def _run_scan():
         })
 
 
-def _start_scan():
-    with _SCAN_LOCK:
-        if _SCAN_JOB["running"]:
-            return False, dict(_SCAN_JOB)
-        _SCAN_JOB.update({
+def _start_job(lock, job, thread_name, target, running_message, ok_message):
+    with lock:
+        if job["running"]:
+            return False, dict(job)
+        job.update({
             "running": True,
             "state": "running",
             "ok": None,
-            "message": "Scanning…",
+            "message": running_message,
             "output": [],
             "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
             "finished_at": None,
         })
-        status = dict(_SCAN_JOB)
-    threading.Thread(target=_run_scan, name="kb-scan", daemon=True).start()
+        status = dict(job)
+    threading.Thread(
+        target=_run_job, args=(lock, job, target, ok_message, running_message),
+        name=thread_name, daemon=True,
+    ).start()
     return True, status
+
+
+def _scan_target():
+    from . import ingest as kb_ingest
+
+    kb_ingest.main()
+
+
+def _start_scan():
+    return _start_job(_SCAN_LOCK, _SCAN_JOB, "kb-scan", _scan_target,
+                       "Scanning…", "Scan finished.")
+
+
+def _catalog_target():
+    from . import index_update
+
+    index_update.main()
+
+
+def _start_catalog_rebuild():
+    return _start_job(_CATALOG_LOCK, _CATALOG_JOB, "kb-catalog", _catalog_target,
+                       "Rebuilding catalog…", "Catalog rebuilt.")
+
+
+def _catalog_status():
+    with _CATALOG_LOCK:
+        return dict(_CATALOG_JOB)
 
 
 def _run_proposal_apply(pid):
@@ -359,8 +393,37 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, _proposal_status())
         elif path == "/scan":
             self._send_json(200, _scan_status())
+        elif path == "/catalog":
+            self._send_json(200, _catalog_status())
+        elif path == "/documents":
+            self._get_documents()
         else:
             self._send_json(404, {"error": "not_found"})
+
+    def _get_documents(self):
+        """The tag/catalog browser's data: every entry in INDEX.json."""
+        from . import index as kb_index
+
+        try:
+            index = kb_index.load_index()
+        except Exception as exc:
+            self._send_json(503, {"error": f"{type(exc).__name__}: {exc}"})
+            return
+        docs = [
+            {
+                "key": key,
+                "source_file": entry.get("source_file"),
+                "category": entry.get("category"),
+                "title": entry.get("title") or entry.get("source_file"),
+                "summary": entry.get("summary") or "",
+                "topics": entry.get("topics") or [],
+                "sensitivity": entry.get("sensitivity"),
+                "indexed_at": entry.get("indexed_at"),
+            }
+            for key, entry in index.items()
+        ]
+        docs.sort(key=lambda d: (d["category"] or "", d["title"] or ""))
+        self._send_json(200, {"documents": docs, "count": len(docs)})
 
     def do_POST(self):
         if not self._require_auth():
@@ -384,6 +447,9 @@ class Handler(BaseHTTPRequestHandler):
             self._post_settings(body)
         elif path == "/scan":
             started, status = _start_scan()
+            self._send_json(202 if started else 409, status)
+        elif path == "/catalog":
+            started, status = _start_catalog_rebuild()
             self._send_json(202 if started else 409, status)
         else:
             self._send_json(404, {"error": "not_found"})

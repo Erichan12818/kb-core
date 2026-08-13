@@ -339,6 +339,36 @@
       font-size: 12px;
     }
 
+    .documents-toolbar { display: flex; gap: 14px; margin: 4px 0 18px; }
+    .documents-toolbar input { flex: 1; }
+    .documents-toolbar select { max-width: 240px; }
+    .documents-list { display: grid; gap: 12px; }
+    .document-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+    }
+    .document-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .document-title { font-weight: 700; }
+    .document-category { color: var(--muted); font: 12px/1.4 var(--mono); white-space: nowrap; }
+    .document-summary { margin: 6px 0 10px; color: var(--muted); font-size: 13px; }
+    .document-source { margin: 0 0 10px; color: var(--muted); font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+    .document-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .document-tag {
+      font-size: 12px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--accent);
+    }
+    .document-tags-empty { font-size: 12px; color: var(--muted); font-style: italic; }
+    .document-sensitivity {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--warn);
+    }
+
     @media (max-width: 900px) {
       .shell { width: min(100% - 24px, 1480px); }
       .header-inner { gap: 20px; }
@@ -392,6 +422,7 @@
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="proposals-panel" data-tab="proposals">Pending proposals</button>
         <button id="ask-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="ask-panel" data-tab="ask">Ask</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="health-panel" data-tab="health">Health</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="documents-panel" data-tab="documents">Documents</button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel" data-tab="settings">Settings</button>
       </nav>
     </div>
@@ -469,6 +500,24 @@
       <div id="directory-stats"></div>
     </section>
 
+    <section id="documents-panel" role="tabpanel" data-panel="documents" hidden>
+      <div class="panel-heading">
+        <div>
+          <h1>Documents</h1>
+          <p class="lede">Every document the catalog has classified, with its title, topic tags, and category. A blank tag list means either the document was too short to classify, or no LLM role is configured — see Settings → Ask.</p>
+        </div>
+        <button id="refresh-documents" class="button secondary" type="button">Refresh</button>
+      </div>
+      <div class="documents-toolbar">
+        <input id="documents-filter" type="search" placeholder="Filter by title, tag, or category" autocomplete="off">
+        <select id="documents-category-filter">
+          <option value="">All categories</option>
+        </select>
+      </div>
+      <div id="documents-status" class="status-line" aria-live="polite"></div>
+      <div id="documents-list" class="documents-list"></div>
+    </section>
+
     <section id="settings-panel" role="tabpanel" data-panel="settings" hidden>
       <div class="panel-heading">
         <div>
@@ -503,12 +552,18 @@
         </div>
         <pre id="scan-output" class="scan-output" hidden></pre>
 
+        <div class="settings-scan">
+          <button id="catalog-rebuild" class="button secondary" type="button">Rebuild catalog and tags</button>
+          <span id="catalog-status" class="status-line" aria-live="polite">Titles, summaries, and topic tags for whatever a scan has indexed but not yet catalogued. Runs automatically after a scan; use this if that step was interrupted.</span>
+        </div>
+        <pre id="catalog-output" class="scan-output" hidden></pre>
+
         <h2 class="settings-heading">Ask</h2>
         <label>
           <span class="field-label">Provider</span>
           <select id="settings-ask-provider">
-            <option value="cloud">Cloud (API key)</option>
-            <option value="local">Local (Ollama)</option>
+            <option value="cloud">Cloud</option>
+            <option value="local">Local</option>
           </select>
           <span class="field-hint">Local keeps everything on this machine — no key, no network call. Cloud reaches whatever OpenAI-compatible endpoint you name, including Anthropic's or OpenAI's own API (a separate account and key from a Claude or ChatGPT subscription — those are not API access).</span>
         </label>
@@ -843,6 +898,7 @@
       if (name === "proposals") loadProposals();
       if (name === "health") loadHealth();
       if (name === "settings") loadSettings();
+      if (name === "documents") loadDocuments();
     }
 
     byId("search-form").addEventListener("submit", (event) => {
@@ -1038,17 +1094,95 @@
       } catch (error) {
         setStatus(byId("settings-status"), "Could not load settings: " + error.message, "error");
       }
-      try {
-        // A scan started before this tab was opened should still be visible.
-        const status = await fetchJSON("/scan");
-        if (status.state !== "idle") {
-          renderScan(status);
-          if (status.running) setTimeout(pollScan, 1500);
+      // A job started before this tab was opened should still be visible.
+      for (const [endpoint, job] of [["/scan", scanJob], ["/catalog", catalogJob]]) {
+        try {
+          const status = await fetchJSON(endpoint);
+          if (status.state !== "idle") {
+            job.render(status);
+            if (status.running) setTimeout(job.poll, 1500);
+          }
+        } catch (error) {
+          // Nothing to show; the button still works.
         }
-      } catch (error) {
-        // Nothing to show; the button still works.
       }
     }
+
+    let documentsCache = [];
+
+    function renderDocuments() {
+      const list = byId("documents-list");
+      list.textContent = "";
+      const term = byId("documents-filter").value.trim().toLowerCase();
+      const category = byId("documents-category-filter").value;
+      const filtered = documentsCache.filter((doc) => {
+        if (category && doc.category !== category) return false;
+        if (!term) return true;
+        const haystack = [doc.title, doc.category, ...(doc.topics || [])].join(" ").toLowerCase();
+        return haystack.includes(term);
+      });
+
+      setStatus(
+        byId("documents-status"),
+        `${filtered.length} of ${documentsCache.length} document(s)`,
+      );
+
+      for (const doc of filtered) {
+        const card = document.createElement("div");
+        card.className = "document-card";
+
+        const head = document.createElement("div");
+        head.className = "document-card-head";
+        appendText(head, "div", "document-title", doc.title);
+        appendText(head, "div", "document-category", doc.category);
+        card.appendChild(head);
+
+        if (doc.sensitivity && doc.sensitivity !== "public") {
+          appendText(card, "div", "document-sensitivity", doc.sensitivity);
+        }
+        if (doc.summary) appendText(card, "p", "document-summary", doc.summary);
+        appendText(card, "p", "document-source", doc.source_file);
+
+        const tags = document.createElement("div");
+        tags.className = "document-tags";
+        if (doc.topics && doc.topics.length) {
+          for (const topic of doc.topics) appendText(tags, "span", "document-tag", topic);
+        } else {
+          appendText(tags, "span", "document-tags-empty", "No tags yet");
+        }
+        card.appendChild(tags);
+
+        list.appendChild(card);
+      }
+    }
+
+    async function loadDocuments() {
+      try {
+        const data = await fetchJSON("/documents");
+        documentsCache = data.documents || [];
+        const select = byId("documents-category-filter");
+        const current = select.value;
+        select.textContent = "";
+        const allOption = document.createElement("option");
+        allOption.value = "";
+        allOption.textContent = "All categories";
+        select.appendChild(allOption);
+        for (const category of [...new Set(documentsCache.map((d) => d.category))].sort()) {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category;
+          select.appendChild(option);
+        }
+        select.value = current;
+        renderDocuments();
+      } catch (error) {
+        setStatus(byId("documents-status"), "Could not load documents: " + error.message, "error");
+      }
+    }
+
+    byId("documents-filter").addEventListener("input", renderDocuments);
+    byId("documents-category-filter").addEventListener("change", renderDocuments);
+    byId("refresh-documents").addEventListener("click", loadDocuments);
 
     async function saveSettings() {
       const status = byId("settings-status");
@@ -1103,47 +1237,49 @@
     }
     byId("settings-ask-provider").addEventListener("change", toggleAskProvider);
 
-    function renderScan(status) {
-      const line = byId("scan-status");
-      const output = byId("scan-output");
-      const kind = status.state === "failed" ? "error"
-        : status.state === "completed" ? "success" : "";
-      setStatus(line, status.message || status.state, kind);
-      byId("scan-now").disabled = !!status.running;
-      if (status.output && status.output.length) {
-        output.hidden = false;
-        output.textContent = status.output.join("\n");
-      }
-      return status;
-    }
-
-    async function pollScan() {
-      try {
-        const status = renderScan(await fetchJSON("/scan"));
-        if (status.running) {
-          setTimeout(pollScan, 1500);
-        } else if (status.ok) {
-          // The catalog and category list change as a result of a scan.
-          loadTaxonomy();
+    // Scan and catalog rebuild are both background jobs with the same shape
+    // (start, poll, show output) — one factory rather than duplicating the
+    // start/poll/render logic per job.
+    function jobController(endpoint, buttonId, statusId, outputId, onDone) {
+      const render = (status) => {
+        const kind = status.state === "failed" ? "error"
+          : status.state === "completed" ? "success" : "";
+        setStatus(byId(statusId), status.message || status.state, kind);
+        byId(buttonId).disabled = !!status.running;
+        if (status.output && status.output.length) {
+          byId(outputId).hidden = false;
+          byId(outputId).textContent = status.output.join("\n");
         }
-      } catch (error) {
-        setStatus(byId("scan-status"), "Lost track of the scan: " + error.message, "error");
-        byId("scan-now").disabled = false;
-      }
+        return status;
+      };
+      const poll = async () => {
+        try {
+          const status = render(await fetchJSON(endpoint));
+          if (status.running) setTimeout(poll, 1500);
+          else if (status.ok && onDone) onDone();
+        } catch (error) {
+          setStatus(byId(statusId), "Lost track of the job: " + error.message, "error");
+          byId(buttonId).disabled = false;
+        }
+      };
+      byId(buttonId).addEventListener("click", async () => {
+        byId(buttonId).disabled = true;
+        byId(outputId).hidden = true;
+        setStatus(byId(statusId), "Starting…");
+        try {
+          render(await fetchJSON(endpoint, { method: "POST", body: "{}" }));
+          setTimeout(poll, 1000);
+        } catch (error) {
+          setStatus(byId(statusId), error.message, "error");
+          byId(buttonId).disabled = false;
+        }
+      });
+      return { render, poll };
     }
 
-    byId("scan-now").addEventListener("click", async () => {
-      byId("scan-now").disabled = true;
-      byId("scan-output").hidden = true;
-      setStatus(byId("scan-status"), "Starting…");
-      try {
-        renderScan(await fetchJSON("/scan", { method: "POST", body: "{}" }));
-        setTimeout(pollScan, 1000);
-      } catch (error) {
-        setStatus(byId("scan-status"), error.message, "error");
-        byId("scan-now").disabled = false;
-      }
-    });
+    const scanJob = jobController("/scan", "scan-now", "scan-status", "scan-output", loadTaxonomy);
+    const catalogJob = jobController("/catalog", "catalog-rebuild", "catalog-status", "catalog-output",
+      () => { if (typeof loadDocuments === "function") loadDocuments(); });
 
     loadTaxonomy();
     loadCapabilities();
