@@ -542,19 +542,7 @@
         </div>
       </div>
 
-      <form id="capture-text-form" class="settings-form">
-        <label>
-          <span class="field-label">Text or URL</span>
-          <textarea id="capture-content" rows="6" placeholder="Paste a URL, or write a note" required></textarea>
-        </label>
-        <label>
-          <span class="field-label">Category</span>
-          <input id="capture-category" list="capture-category-options" placeholder="inbox" autocomplete="off">
-          <datalist id="capture-category-options"></datalist>
-        </label>
-        <button id="capture-save" class="button" type="submit">Save</button>
-      </form>
-      <div id="capture-status" class="status-line" aria-live="polite"></div>
+      <datalist id="capture-category-options"></datalist>
 
       <h2 class="settings-heading">Upload a finished document</h2>
       <p class="field-hint">Already-written files — a colleague's report, a signed form — go in as-is; nothing is regenerated. Readable formats: .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml. Other types are still saved, but will not be searchable.</p>
@@ -570,6 +558,20 @@
         <button id="capture-upload" class="button secondary" type="submit">Upload</button>
       </form>
       <div id="capture-upload-status" class="status-line" aria-live="polite"></div>
+
+      <h2 class="settings-heading">Save text or a link</h2>
+      <form id="capture-text-form" class="settings-form">
+        <label>
+          <span class="field-label">Text or URL</span>
+          <textarea id="capture-content" rows="6" placeholder="Paste a URL, or write a note" required></textarea>
+        </label>
+        <label>
+          <span class="field-label">Category</span>
+          <input id="capture-category" list="capture-category-options" placeholder="inbox" autocomplete="off">
+        </label>
+        <button id="capture-save" class="button" type="submit">Save</button>
+      </form>
+      <div id="capture-status" class="status-line" aria-live="polite"></div>
     </section>
 
     <section id="proposals-panel" role="tabpanel" data-panel="proposals" hidden>
@@ -635,6 +637,7 @@
           <dt>Search index</dt><dd id="settings-index-path"></dd>
           <dt>API key file</dt><dd id="settings-secrets-path"></dd>
           <dt>Model cache</dt><dd id="settings-model-cache-path"></dd>
+          <dt>Notes folder</dt><dd id="settings-notes-root-path"></dd>
         </dl>
 
         <label>
@@ -797,7 +800,7 @@
       "Storage": "儲存",
       "Vault folder": "資料庫資料夾", "restart required": "需要重啟",
       "Config": "設定檔", "Search index": "搜尋索引",
-      "API key file": "API 金鑰檔案", "Model cache": "模型快取",
+      "API key file": "API 金鑰檔案", "Model cache": "模型快取", "Notes folder": "筆記資料夾",
       "Extra folders to read": "額外讀取資料夾",
       "One folder per line. Read strictly read-only — files are never moved or modified. A folder that is not mounted right now is fine to list: it is skipped, and anything already indexed from it is kept, not deleted. Reads .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml.":
         "一行一個資料夾。純讀取——檔案永遠唔會被搬動或修改。未掛載嘅資料夾都可以列入：會被跳過，但已索引嘅內容會保留，唔會刪除。支援 .txt .md .pdf .docx .xlsx .pptx .csv .json .yaml。",
@@ -858,6 +861,7 @@
         "已經寫好嘅檔案——例如同事嘅報告、簽署咗嘅表格——會原封不動咁存入，唔會重新生成。支援格式：.txt .md .pdf .docx .xlsx .pptx .csv .json .yaml。其他格式都會儲存，但搜尋唔到。",
       "File": "檔案",
       "Upload": "上載",
+      "Save text or a link": "儲存文字或連結",
       "Matching chunk": "匹配片段",
       "source_path": "source_path", "category": "category", "similarity": "similarity",
     };
@@ -1436,6 +1440,7 @@
       byId("settings-index-path").textContent = settings.index_path || "";
       byId("settings-secrets-path").textContent = settings.secrets_path || "";
       byId("settings-model-cache-path").textContent = settings.model_cache_path || "";
+      byId("settings-notes-root-path").textContent = settings.notes_dir_effective || "";
       renderMcpGuide(settings);
 
       const sources = settings.sources || [];
