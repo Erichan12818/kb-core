@@ -13,7 +13,7 @@ from typing import Any
 from .config import cfg
 from . import store
 
-SERVER_VERSION = "0.2.5"
+SERVER_VERSION = "0.2.6"
 _RECALL: dict[str, Any] = {}
 _LOCK = threading.Lock()
 
