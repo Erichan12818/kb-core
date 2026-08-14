@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .config import cfg
+from .config import atomic_write_text, cfg
 
 
 KB_ROOT = Path(cfg("kb_root"))
@@ -35,10 +35,7 @@ def load():
 
 def save(doc):
     doc["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
-    Path(PROPOSALS_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(PROPOSALS_PATH).write_text(
-        json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(PROPOSALS_PATH, json.dumps(doc, ensure_ascii=False, indent=2))
 
 
 def fingerprint(action, params):

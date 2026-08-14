@@ -32,7 +32,7 @@ network.
 import os
 from pathlib import Path
 
-from .config import cfg, config_path, reload as reload_config
+from .config import atomic_write_text, cfg, config_path, reload as reload_config
 
 CHAT_ROLE = "chat"
 SECRETS_FILENAME = "secrets.env"
@@ -411,11 +411,7 @@ def write_settings(payload):
     raw.setdefault("ocr", {})["enabled"] = ocr_enabled
 
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            _HEADER + yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
+        atomic_write_text(path, _HEADER + yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
     except OSError as exc:
         return False, f"Could not write {path}: {exc}", current, False
 

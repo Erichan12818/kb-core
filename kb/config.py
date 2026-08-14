@@ -205,6 +205,48 @@ def _normalize_llm(data):
     llm["deepseek_env_file"] = providers["cloud"].get("key_env_file", key_env_file)
 
 
+def atomic_write_text(path, text, encoding="utf-8"):
+    """Write text so a reader never sees a partial or corrupted file.
+
+    Plain ``Path.write_text()`` opens the target in place and truncates as it
+    goes; a process killed mid-write (a crash, a force-quit, the host going to
+    sleep or restarting mid-operation — all things that have actually
+    happened to this app during development) can leave the file holding a
+    mix of old and new bytes. A JSON state file in that condition fails to
+    parse at all on the next launch, which is how INDEX.json ended up with
+    trailing data left over from a longer previous version after a shorter
+    new one was written on top of it, caught only because the health check
+    for exactly this — data still on disk that no longer parses — flagged
+    it. Writing to a temp file in the same directory and renaming onto the
+    target avoids that: os.replace() is atomic on both POSIX and Windows, so
+    the target is always either the complete old file or the complete new
+    one, never a partial write from either.
+
+    The temp name has to be unique per *call*, not just per process: this
+    codebase runs ingest/catalog work on background threads within the same
+    process (see kb.api's scan/catalog jobs), and a name keyed on os.getpid()
+    alone collides between threads — caught by a concurrency test that had
+    two threads both replace() the same temp file, so the loser raised
+    FileNotFoundError instead of just losing the race harmlessly.
+    tempfile.mkstemp() guarantees a fresh name per call.
+    """
+    import tempfile
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def config_path():
     """Where the active configuration is read from and written back to."""
     return _config_path()

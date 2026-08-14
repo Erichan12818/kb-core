@@ -185,18 +185,33 @@ def enrich_payload(client, category, source_file, title, summary, topics):
 
 # ---------- INDEX / TAXONOMY 讀寫 ----------
 def load_index():
-    return json.loads(Path(INDEX_PATH).read_text(encoding="utf-8")) if os.path.exists(INDEX_PATH) else {}
+    """讀 INDEX.json；壞檔（例如寫入中途俾人 kill 咗）當冇嚟處理，唔好整個 app 卡死。
+
+    save_index() 而家用返 atomic_write_text，新寫入唔會再整成咁；但已經存在
+    嘅壞檔（呢個保護加之前寫低嘅）仲係要呢度接住，等下次 catalog rebuild
+    自動由 Qdrant 重新推算，唔使人手介入修檔。"""
+    if not os.path.exists(INDEX_PATH):
+        return {}
+    try:
+        return json.loads(Path(INDEX_PATH).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 def save_index(index):
-    Path(INDEX_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(INDEX_PATH).write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .config import atomic_write_text
+    atomic_write_text(INDEX_PATH, json.dumps(index, ensure_ascii=False, indent=2))
 
 def load_taxonomy():
-    return json.loads(Path(TAXONOMY_PATH).read_text(encoding="utf-8")) if os.path.exists(TAXONOMY_PATH) else None
+    if not os.path.exists(TAXONOMY_PATH):
+        return None
+    try:
+        return json.loads(Path(TAXONOMY_PATH).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 def save_taxonomy(tax):
-    Path(TAXONOMY_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(TAXONOMY_PATH).write_text(json.dumps(tax, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .config import atomic_write_text
+    atomic_write_text(TAXONOMY_PATH, json.dumps(tax, ensure_ascii=False, indent=2))
 
 def seed_taxonomy_from_index(index, today):
     """首次：由現有 index 推出 categories + tag 詞彙表。"""

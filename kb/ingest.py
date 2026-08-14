@@ -13,7 +13,7 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
-from .config import cfg
+from .config import atomic_write_text, cfg
 from . import embedding, store
 
 # ==================== 設定 ====================
@@ -447,8 +447,7 @@ def main():
     if new_points:
         print(f"🧠 upsert 新向量 {len(new_points)} 點")
 
-    Path(STATE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(STATE_PATH).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(STATE_PATH, json.dumps(manifest, ensure_ascii=False, indent=2))
 
     print(f"\n🎉 完成：處理 {processed} 檔 / 未變 {unchanged} 檔 / 跳過 secrets {len(skipped_secret)} 檔"
           + (f" / 太大 {len(skipped_large)} 檔" if skipped_large else ""))

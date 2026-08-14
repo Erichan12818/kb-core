@@ -18,7 +18,7 @@ kb_health.py — KB 全鏈路健康檢查（只在狀態變化時推播，避免
 """
 import os, sys, json, urllib.request, urllib.error, datetime
 from pathlib import Path
-from .config import cfg
+from .config import atomic_write_text, cfg
 from . import notify as kb_notify
 
 KB_ROOT    = cfg("kb_root")
@@ -201,10 +201,7 @@ def load_state():
 
 
 def save_state(s):
-    # On a fresh vault state/ does not exist yet, and the first scheduled health
-    # run would otherwise die before it could report anything.
-    Path(STATE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(STATE_PATH).write_text(json.dumps(s, ensure_ascii=False))
+    atomic_write_text(STATE_PATH, json.dumps(s, ensure_ascii=False))
 
 
 def notify(title, msg):
